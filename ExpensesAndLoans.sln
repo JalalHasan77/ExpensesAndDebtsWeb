@@ -1,0 +1,43 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.30204.135
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{E24C65DC-7377-472B-9ABA-BC803B73C61A}") = "ExpensesAndLoans", ".", "{04B88AC4-F658-4AA1-8462-0A554998FB22}"
+	ProjectSection(WebsiteProperties) = preProject
+		TargetFrameworkMoniker = ".NETFramework,Version%3Dv4.5.1"
+		Debug.AspNetCompiler.VirtualPath = "/localhost_54719"
+		Debug.AspNetCompiler.PhysicalPath = "..\ExpensesAndLoans\"
+		Debug.AspNetCompiler.TargetPath = "PrecompiledWeb\localhost_54719\"
+		Debug.AspNetCompiler.Updateable = "true"
+		Debug.AspNetCompiler.ForceOverwrite = "true"
+		Debug.AspNetCompiler.FixedNames = "false"
+		Debug.AspNetCompiler.Debug = "True"
+		Release.AspNetCompiler.VirtualPath = "/localhost_54719"
+		Release.AspNetCompiler.PhysicalPath = "..\ExpensesAndLoans\"
+		Release.AspNetCompiler.TargetPath = "PrecompiledWeb\localhost_54719\"
+		Release.AspNetCompiler.Updateable = "true"
+		Release.AspNetCompiler.ForceOverwrite = "true"
+		Release.AspNetCompiler.FixedNames = "false"
+		Release.AspNetCompiler.Debug = "False"
+		VWDPort = "54719"
+		SlnRelativePath = "..\ExpensesAndLoans\"
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{4653C0FE-DE65-4EAD-864F-2B9D7ECBB268}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{04B88AC4-F658-4AA1-8462-0A554998FB22}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{04B88AC4-F658-4AA1-8462-0A554998FB22}.Debug|Any CPU.Build.0 = Debug|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {D5E44344-CC58-4664-A4E6-AE1449BA84BC}
+	EndGlobalSection
+EndGlobal

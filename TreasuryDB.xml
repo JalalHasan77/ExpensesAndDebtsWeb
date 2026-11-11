@@ -1,0 +1,141 @@
+<?xml version="1.0" standalone="yes"?>
+<NewDataSet>
+  <xs:schema id="NewDataSet" xmlns="" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xs:element name="NewDataSet" msdata:IsDataSet="true" msdata:UseCurrentLocale="true">
+      <xs:complexType>
+        <xs:choice minOccurs="0" maxOccurs="unbounded">
+          <xs:element name="DealDetails">
+            <xs:complexType>
+              <xs:sequence>
+                <xs:element name="CUST_ID" type="xs:decimal" minOccurs="0" />
+                <xs:element name="CUST_B_NAME" type="xs:string" minOccurs="0" />
+                <xs:element name="STATE" type="xs:string" minOccurs="0" />
+                <xs:element name="BBTP_B_DESC" type="xs:string" minOccurs="0" />
+                <xs:element name="CPLM_BB_EXPOSURE_LMT_AMNT" type="xs:decimal" minOccurs="0" />
+                <xs:element name="CPLM_PB_EXPOSURE_LMT_AMNT" type="xs:decimal" minOccurs="0" />
+                <xs:element name="DEAL_NUM_3" type="xs:string" minOccurs="0" />
+                <xs:element name="VALUE_DATE" type="xs:dateTime" minOccurs="0" />
+                <xs:element name="MATURITY_DATE" type="xs:dateTime" minOccurs="0" />
+                <xs:element name="INT_RATE" type="xs:decimal" minOccurs="0" />
+                <xs:element name="AMNT" type="xs:decimal" minOccurs="0" />
+                <xs:element name="INTEREST" type="xs:decimal" minOccurs="0" />
+                <xs:element name="NBR_OF_DAYS" type="xs:decimal" minOccurs="0" />
+                <xs:element name="OPER_DATE" type="xs:dateTime" minOccurs="0" />
+                <xs:element name="SWIFT" type="xs:string" minOccurs="0" />
+                <xs:element name="AMOUNTSALE" type="xs:string" minOccurs="0" />
+                <xs:element name="EXCHANGE_RATE" type="xs:string" minOccurs="0" />
+                <xs:element name="BANK_CODE" type="xs:string" minOccurs="0" />
+                <xs:element name="CURRENCYNAME" type="xs:string" minOccurs="0" />
+                <xs:element name="USEDAMOUNNT" type="xs:string" minOccurs="0" />
+                <xs:element name="REMAININGAMOUNT" type="xs:string" minOccurs="0" />
+              </xs:sequence>
+            </xs:complexType>
+          </xs:element>
+          <xs:element name="INSTITUTES_DEALERS">
+            <xs:complexType>
+              <xs:sequence>
+                <xs:element name="NAME" type="xs:string" minOccurs="0" />
+                <xs:element name="PHONE1" type="xs:string" minOccurs="0" />
+                <xs:element name="PHONE2" type="xs:string" minOccurs="0" />
+                <xs:element name="FAX" type="xs:string" minOccurs="0" />
+                <xs:element name="EMAIL" type="xs:string" minOccurs="0" />
+              </xs:sequence>
+            </xs:complexType>
+          </xs:element>
+          <xs:element name="ApprovingDetails">
+            <xs:complexType>
+              <xs:sequence>
+                <xs:element name="STATE" type="xs:string" minOccurs="0" />
+                <xs:element name="USER_NAME" type="xs:string" minOccurs="0" />
+                <xs:element name="FROMSTATE" type="xs:string" minOccurs="0" />
+                <xs:element name="ACTION" type="xs:string" minOccurs="0" />
+                <xs:element name="IMPLEMENTER" type="xs:string" minOccurs="0" />
+                <xs:element name="TOSTATE" type="xs:string" minOccurs="0" />
+                <xs:element name="DATE_" type="xs:string" minOccurs="0" />
+                <xs:element name="TIME_" type="xs:string" minOccurs="0" />
+                <xs:element name="TOSTATE1" type="xs:string" minOccurs="0" />
+              </xs:sequence>
+            </xs:complexType>
+          </xs:element>
+        </xs:choice>
+      </xs:complexType>
+    </xs:element>
+  </xs:schema>
+  <DealDetails>
+    <CUST_ID>10</CUST_ID>
+    <CUST_B_NAME>Central Bank of Bahrain</CUST_B_NAME>
+    <STATE>Matured</STATE>
+    <BBTP_B_DESC>PBO- Interbank Placements - PLF</BBTP_B_DESC>
+    <CPLM_BB_EXPOSURE_LMT_AMNT>999999999.000</CPLM_BB_EXPOSURE_LMT_AMNT>
+    <CPLM_PB_EXPOSURE_LMT_AMNT>999999999.000</CPLM_PB_EXPOSURE_LMT_AMNT>
+    <DEAL_NUM_3>PLF-10866</DEAL_NUM_3>
+    <VALUE_DATE>2025-06-24T00:00:00+03:00</VALUE_DATE>
+    <MATURITY_DATE>2025-06-25T00:00:00+03:00</MATURITY_DATE>
+    <INT_RATE>5.00000000</INT_RATE>
+    <AMNT>5000000.000</AMNT>
+    <INTEREST>694.444</INTEREST>
+    <NBR_OF_DAYS>1</NBR_OF_DAYS>
+    <OPER_DATE>2025-06-24T00:00:00+03:00</OPER_DATE>
+    <SWIFT>BMAGBHBM</SWIFT>
+    <USEDAMOUNNT>6853614.52</USEDAMOUNNT>
+    <REMAININGAMOUNT>8146385.48</REMAININGAMOUNT>
+  </DealDetails>
+  <INSTITUTES_DEALERS>
+    <NAME>Afaf Khalfan</NAME>
+    <PHONE1>17547722</PHONE1>
+    <PHONE2>-</PHONE2>
+    <FAX>17532050</FAX>
+    <EMAIL>akhalfan@cbb.gov.bh</EMAIL>
+  </INSTITUTES_DEALERS>
+  <INSTITUTES_DEALERS>
+    <NAME>Mohammed Al Fadhel</NAME>
+    <PHONE1>17547758</PHONE1>
+    <PHONE2>-</PHONE2>
+    <FAX>-</FAX>
+    <EMAIL>-</EMAIL>
+  </INSTITUTES_DEALERS>
+  <ApprovingDetails>
+    <STATE>0000</STATE>
+    <USER_NAME>Kumail Abdulla</USER_NAME>
+    <FROMSTATE>New</FROMSTATE>
+    <ACTION>Forward to Checkers</ACTION>
+    <IMPLEMENTER>Maker</IMPLEMENTER>
+    <TOSTATE>Waiting for Checker</TOSTATE>
+    <DATE_>24 Jun 2025</DATE_>
+    <TIME_>13:23:29</TIME_>
+    <TOSTATE1>0200</TOSTATE1>
+  </ApprovingDetails>
+  <ApprovingDetails>
+    <STATE>0200</STATE>
+    <USER_NAME>Alaa AlQassab</USER_NAME>
+    <FROMSTATE>Waiting for Checker</FROMSTATE>
+    <ACTION>Move to Authorizers</ACTION>
+    <IMPLEMENTER>Checker</IMPLEMENTER>
+    <TOSTATE>Waiting for Authorizer Confirmation</TOSTATE>
+    <DATE_>24 Jun 2025</DATE_>
+    <TIME_>13:27:00</TIME_>
+    <TOSTATE1>0400</TOSTATE1>
+  </ApprovingDetails>
+  <ApprovingDetails>
+    <STATE>0400</STATE>
+    <USER_NAME>Parween Ali</USER_NAME>
+    <FROMSTATE>Waiting for Authorizer Confirmation</FROMSTATE>
+    <ACTION>Approve</ACTION>
+    <IMPLEMENTER>Authorizer</IMPLEMENTER>
+    <TOSTATE>Waiting for Banking Operations Execution</TOSTATE>
+    <DATE_>24 Jun 2025</DATE_>
+    <TIME_>13:37:19</TIME_>
+    <TOSTATE1>0600</TOSTATE1>
+  </ApprovingDetails>
+  <ApprovingDetails>
+    <STATE>0600</STATE>
+    <USER_NAME>Khalid Taha</USER_NAME>
+    <FROMSTATE>Waiting for Banking Operations Execution</FROMSTATE>
+    <ACTION>Mark as PROCESSED</ACTION>
+    <IMPLEMENTER>Executer</IMPLEMENTER>
+    <TOSTATE>Matured</TOSTATE>
+    <DATE_>24 Jun 2025</DATE_>
+    <TIME_>13:43:29</TIME_>
+    <TOSTATE1>1000</TOSTATE1>
+  </ApprovingDetails>
+</NewDataSet>

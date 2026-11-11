@@ -1,0 +1,3 @@
+Provider=OraOLEDB.Oracle;Data Source=(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST=scan-eskan)(PORT=1521))(CONNECT_DATA=(SERVICE_NAME=ebdb)));User Id=inap;Password=inap;
+
+Select TITLE, LINK, ICON, WIDTH from TRSRY_MENU where USERGROUP like '%0003%'
