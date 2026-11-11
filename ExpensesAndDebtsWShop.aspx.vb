@@ -112,6 +112,7 @@ Partial Class ExpensesAndDebtsWShop
         Public Property VAT As Decimal
         Public Property ShopId As String = ""
         Public Property GroupFilter As Integer               ' Order grid: 0 = all members, else a Group_ID
+        Public Property ShopFilter As String = ""            ' Order grid with a Profits column: the one shop whose accounts show
         Public Property Members As New List(Of MemberLine)
         Public Property Items As New List(Of ItemCol)
         Public Property Preview As New List(Of PreviewLine)
@@ -185,6 +186,7 @@ Partial Class ExpensesAndDebtsWShop
         membersCache = Nothing
         accountsCache = Nothing
         accountInfoCache = Nothing
+        shopCustomerCache = Nothing
     End Sub
 
     ''' <summary>"" when the ledger tables are there; otherwise what to do.</summary>
@@ -292,6 +294,7 @@ Partial Class ExpensesAndDebtsWShop
     End Class
 
     Private accountInfoCache As Dictionary(Of String, AccountInfo)
+    Private shopCustomerCache As HashSet(Of String)   ' members of Customer Type Shop
     Private Shared accountColumnsReady As Boolean
 
     ''' <summary>Adds Members.Owner_ID and Members.Account_Type when they are missing (once per application start).</summary>
@@ -337,9 +340,13 @@ Partial Class ExpensesAndDebtsWShop
             EnsureAccountColumns()
             Dim dt As DataTable = OrdersDB.GetDataTable("SELECT Member_ID, " & OwnerColumn & ", " & AccountTypeColumn & ", " &
                                                         LoanLimitColumn & ", " & LoanOfColumn & " FROM Members")
+            Dim shops As New HashSet(Of String)(StringComparer.OrdinalIgnoreCase)
             For Each r As DataRow In dt.Rows
                 Dim owner As String = ColText(r, OwnerColumn).Trim()
-                If owner = "" Then Continue For
+                If owner = "" Then
+                    If SameName(ColText(r, AccountTypeColumn).Trim(), CustomerTypeShop) Then shops.Add(r("Member_ID").ToString())
+                    Continue For
+                End If
                 Dim limitValue As Object = r(LoanLimitColumn)
                 d(r("Member_ID").ToString()) = New AccountInfo With {
                     .OwnerId = owner, .AccountType = ColText(r, AccountTypeColumn).Trim(),
@@ -347,6 +354,7 @@ Partial Class ExpensesAndDebtsWShop
                     .LoanOf = ColText(r, LoanOfColumn).Trim()}
             Next
             accountInfoCache = d
+            shopCustomerCache = shops
         End If
         Return accountInfoCache
     End Function
@@ -959,6 +967,11 @@ Partial Class ExpensesAndDebtsWShop
                 Catch ex As Exception
                     ShowMsg("The loan accounts could not be checked: " & ex.Message, True)
                 End Try
+                Try
+                    EnsureShopsGroup()   ' every shop in the group "Shops" (also shops made before this rule)
+                Catch ex As Exception
+                    ShowMsg("The shops could not be put in the group ""Shops"": " & ex.Message, True)
+                End Try
             End If
             If LedgerProblem() = "" Then ResetOrder()
             If IsAdmin Then
@@ -971,6 +984,9 @@ Partial Class ExpensesAndDebtsWShop
             Dim posted As String = Request.Form("groupFilter")
             Dim g As Integer
             If posted IsNot Nothing AndAlso Integer.TryParse(posted, NumberStyles.Integer, CultureInfo.InvariantCulture, g) Then State.GroupFilter = g
+            ' The shop picked under it (only there when the order has a Profits column)
+            Dim postedShop As String = Request.Form("shopFilter")
+            If postedShop IsNot Nothing Then State.ShopFilter = postedShop
             SyncFromUi()   ' only the administrator has the Order tab
         End If
     End Sub
@@ -1298,7 +1314,18 @@ Partial Class ExpensesAndDebtsWShop
         For Each g As MemberGroup In GroupList()
             sb.AppendFormat("<option value=""{0}""{1}>{2}</option>", g.Id, If(st.GroupFilter = g.Id, " selected=""selected""", ""), Server.HtmlEncode(g.Name))
         Next
-        sb.Append("</select></td>")
+        sb.Append("</select>")
+        ' With a Profits column: the shop whose accounts are listed (one shop at a time)
+        Dim shownShop As String = ShownShopId(st)
+        If shownShop <> "" Then
+            sb.Append("<select name=""shopFilter"" class=""grp-filter shop-filter"" title=""The shop whose accounts are listed"" onchange=""__doPostBack('shopFilter','')"">")
+            For Each s As Member In ShopCustomers()
+                sb.AppendFormat("<option value=""{0}""{1}>Shop: {2}</option>", Server.HtmlEncode(s.Id),
+                                If(SameName(s.Id, shownShop), " selected=""selected""", ""), Server.HtmlEncode(s.Name))
+            Next
+            sb.Append("</select>")
+        End If
+        sb.Append("</td>")
         For Each it As ItemCol In st.Items
             sb.AppendFormat("<td class=""it"">{0}</td>", Server.HtmlEncode(it.Title))
         Next
@@ -1488,10 +1515,45 @@ Partial Class ExpensesAndDebtsWShop
     ''' The Order grid's rows for the group picked (all of them for "All members"). The shop's goods lines,
     ''' and anyone with something typed in this order, always stay, so nothing typed is hidden.
     ''' </summary>
+    ''' <summary>
+    ''' The lines shown on the grid. A shop's accounts show only when the order has a Profits column, and then
+    ''' only the picked shop's (whatever the group filter). Anyone with something typed always stays.
+    ''' </summary>
     Private Function VisibleMembers(st As OrderState) As List(Of MemberLine)
-        If st.GroupFilter = 0 OrElse Not GroupList().Any(Function(g) g.Id = st.GroupFilter) Then Return st.Members
-        Return st.Members.Where(Function(m) m.IsShopLine OrElse m.GroupIds.Contains(st.GroupFilter) OrElse
-                                            m.Credit <> 0D OrElse m.Withdraw <> 0D OrElse m.Qty.Any(Function(q) q <> 0D)).ToList()
+        Dim shownShop As String = ShownShopId(st)
+        Dim groupOn As Boolean = st.GroupFilter <> 0 AndAlso GroupList().Any(Function(g) g.Id = st.GroupFilter)
+        Return st.Members.Where(Function(m)
+                                    If HasTyped(m) OrElse m.IsShopLine Then Return True
+                                    If m.OwnerId <> "" AndAlso IsShopCustomer(m.OwnerId) Then Return SameName(m.OwnerId, shownShop)
+                                    Return Not groupOn OrElse m.GroupIds.Contains(st.GroupFilter)
+                                End Function).ToList()
+    End Function
+
+    ' ---------- Shops on the Order grid ----------
+
+    ''' <summary>The active shops (Customer Type Shop), by name.</summary>
+    Private Function ShopCustomers() As List(Of Member)
+        Return LedgerMembers().Where(Function(m) m.IsActive AndAlso IsShopCustomer(m.Id)).OrderBy(Function(m) m.Name).ToList()
+    End Function
+
+    ''' <summary>
+    ''' The shop whose accounts the grid lists: "" without a Profits column; else the one picked, or at first
+    ''' the shop with the most movements (its own and its accounts' Member_Movements).
+    ''' </summary>
+    Private Function ShownShopId(st As OrderState) As String
+        If ProfitsIndex(st) < 0 Then Return ""
+        Dim shops As List(Of Member) = ShopCustomers()
+        If shops.Count = 0 Then Return ""
+        If shops.Any(Function(s) SameName(s.Id, st.ShopFilter)) Then Return st.ShopFilter
+        Dim moves As New Dictionary(Of String, Double)(StringComparer.OrdinalIgnoreCase)
+        For Each r As DataRow In OrdersDB.GetDataTable("SELECT Member_ID, Member_Movements FROM Members").Rows
+            moves(r("Member_ID").ToString()) = Val(ColText(r, "Member_Movements"))
+        Next
+        Dim score As Func(Of Member, Double) =
+            Function(s) If(moves.ContainsKey(s.Id), moves(s.Id), 0) +
+                        AccountsOfPerson(s.Id).Sum(Function(a) If(moves.ContainsKey(a.Id), moves(a.Id), 0))
+        st.ShopFilter = shops.OrderByDescending(score).ThenBy(Function(s) s.Name).First().Id
+        Return st.ShopFilter
     End Function
 
     ''' <summary>Add New Member: the groups as checkboxes, keeping the ticks already made.</summary>
@@ -1930,7 +1992,91 @@ Partial Class ExpensesAndDebtsWShop
 
     ' ---------- Add New Member (saved to the Members table) ----------
 
+    ' ---------- Add New Member: Customer Type Shop ----------
+    ' A shop is saved like a person (a name that groups its accounts), marked Account_Type = "Shop" in Members,
+    ' with exactly five accounts of type Shop: <Shop>_Budget, _Cash, _Loss, _Profit, _Stock. No others can be
+    ' added or deleted. (Not the ledger's own Shop member type: that one drives the Shop_Stock / Shop_Loss
+    ' goods lines and Shop Purchase / Sale.)
+
+    Private Const CustomerTypeShop As String = "Shop"
+    Private Const ShopsGroupName As String = "Shops"   ' every shop belongs to this group (made when missing)
+
+    ''' <summary>The ID of the group "Shops", created when it does not exist yet.</summary>
+    Private Function ShopsGroupId() As Integer
+        Dim g As MemberGroup = GroupList().FirstOrDefault(Function(x) SameName(x.Name, ShopsGroupName))
+        If g Is Nothing Then
+            g = Ledger.CreateGroup(ShopsGroupName)
+            groupsCache = Nothing
+        End If
+        Return g.Id
+    End Function
+
+    ''' <summary>
+    ''' Puts every shop (and its accounts) in the group "Shops", keeping any other groups it has.
+    ''' Run on the administrator's first page load, so shops made before this rule are fixed too.
+    ''' </summary>
+    Private Sub EnsureShopsGroup()
+        Dim shops As List(Of Member) = LedgerMembers().Where(Function(m) m.IsActive AndAlso IsShopCustomer(m.Id)).ToList()
+        If shops.Count = 0 Then Return
+        Dim gid As Integer = ShopsGroupId()
+        Dim changed As Boolean = False
+        For Each s As Member In shops
+            For Each m As Member In {s}.Concat(AccountsOfPerson(s.Id))
+                If m.GroupIds IsNot Nothing AndAlso m.GroupIds.Contains(gid) Then Continue For
+                Dim groups As New List(Of Integer)(If(m.GroupIds, New List(Of Integer)))
+                groups.Add(gid)
+                Ledger.UpdateMember(m.Id, m.Name, m.StaffId, m.Mobile, m.Cpr, m.Email, groups, m.Status, m.Comment)
+                changed = True
+            Next
+        Next
+        If changed Then ResetLedgerCache()
+    End Sub
+    Private Shared ReadOnly ShopAccountSuffixes As String() = {"_Budget", "_Cash", "_Loss", "_Profit", "_Stock"}
+
+    Private Sub AddShop(shopName As String)
+        Dim shop As Member
+        Try
+            shop = Ledger.CreateMember(shopName, MemberTypes.Person, groupIds:=New List(Of Integer) From {ShopsGroupId()}, status:=MemberStatuses.Active)
+            Using cn As System.Data.OleDb.OleDbConnection = OpenOrdersDb()
+                Using cmd As New System.Data.OleDb.OleDbCommand("UPDATE Members SET " & AccountTypeColumn & " = ? WHERE Member_ID = ?", cn)
+                    cmd.Parameters.Add("@type", System.Data.OleDb.OleDbType.VarWChar, 20).Value = CustomerTypeShop
+                    cmd.Parameters.Add("@id", System.Data.OleDb.OleDbType.VarWChar, 255).Value = shop.Id
+                    cmd.ExecuteNonQuery()
+                End Using
+            End Using
+            ResetLedgerCache()
+        Catch ex As Exception
+            ResetLedgerCache()
+            AddMemberError(ex.Message)   ' the dialog stays open with what was typed
+            Return
+        End Try
+        Dim made As New List(Of String)
+        Try
+            For Each suffix As String In ShopAccountSuffixes
+                CreateAccountMember(shop, shopName & suffix, CustomerTypeShop)
+                made.Add(shopName & suffix)
+            Next
+        Catch ex As Exception
+            ResetLedgerCache()
+            pnlAddMember.Visible = False
+            ShowMsg("Shop """ & shopName & """ was added with " & made.Count & " of its 5 accounts: " & ex.Message, True)
+            RefreshOrderMembers()
+            Return
+        End Try
+        ResetLedgerCache()
+        RefreshOrderMembers()   ' its accounts are on the Order grid straight away
+        pnlAddMember.Visible = False
+        ShowMsg("Shop """ & shopName & """ added as member " & shop.Id & " with its accounts " & String.Join(", ", made) & ".", False)
+    End Sub
+
+    ''' <summary>Is this member a shop customer (Customer Type Shop)?</summary>
+    Private Function IsShopCustomer(memberId As String) As Boolean
+        AccountInfos()
+        Return shopCustomerCache IsNot Nothing AndAlso shopCustomerCache.Contains(If(memberId, ""))
+    End Function
+
     Protected Sub btnAddMember_Click(sender As Object, e As EventArgs) Handles btnAddMember.Click
+        ddlNewMemberKind.SelectedValue = "Individual"
         txtNewMemberName.Text = ""
         txtNewMemberStaffId.Text = ""
         txtNewMemberMobile.Text = ""
@@ -1956,6 +2102,15 @@ Partial Class ExpensesAndDebtsWShop
         Dim memberName As String = txtNewMemberName.Text.Trim()
         Dim balance As Decimal = Math.Round(ParseNumber(txtNewMemberBalance.Text), 3)
         lblAddMemberErr.Visible = False
+        If ddlNewMemberKind.SelectedValue = CustomerTypeShop Then
+            ' A shop: only its name; five accounts of its own
+            If memberName = "" Then
+                AddMemberError("Please enter the shop name.")
+                Return
+            End If
+            AddShop(String.Join(" ", memberName.Split(New Char() {" "c}, StringSplitOptions.RemoveEmptyEntries)))
+            Return
+        End If
         If memberName = "" Then
             AddMemberError("Please enter a member name.")
             Return
@@ -2088,7 +2243,7 @@ Partial Class ExpensesAndDebtsWShop
         For Each mline As MemberLine In st.Members
             If pIdx >= mline.Qty.Count Then Continue For
             Dim profit As Decimal = 0D
-            If Not IsShopAccount(mline.Name) Then
+            If Not IsShopAccount(mline.Name) AndAlso Not (mline.OwnerId <> "" AndAlso IsShopCustomer(mline.OwnerId)) Then   ' no profit on a shop's accounts
                 For c As Integer = 0 To st.Items.Count - 1
                     If c = pIdx OrElse c >= mline.Qty.Count Then Continue For
                     profit += mline.Qty(c) * st.Items(c).Profit
@@ -2127,7 +2282,11 @@ Partial Class ExpensesAndDebtsWShop
 
     ''' <summary>Used by the markup: no profit on the shop's own rows.</summary>
     Protected Function IsShopName(value As Object) As Boolean
-        Return IsShopAccount(Convert.ToString(value))
+        Dim name As String = Convert.ToString(value)
+        If IsShopAccount(name) Then Return True
+        ' A shop's account (Customer Type Shop): no profit either
+        Dim line As MemberLine = State.Members.FirstOrDefault(Function(m) SameName(m.Name, name))
+        Return line IsNot Nothing AndAlso line.OwnerId <> "" AndAlso IsShopCustomer(line.OwnerId)
     End Function
 
     Private Shared Function DefaultTypeOf(m As MemberLine) As String
@@ -3158,7 +3317,8 @@ Partial Class ExpensesAndDebtsWShop
 
             For Each p As Member In people
                 Dim accounts As List(Of Member) = AccountsOfPerson(p.Id)
-                Dim frozenNote As String = If(p.IsFrozen, "<span class=""note"">(frozen)</span>", "")
+                Dim frozenNote As String = If(p.IsFrozen, "<span class=""note"">(frozen)</span>", "") &
+                                           If(IsShopCustomer(p.Id), "<span class=""note"">shop</span>", "")
                 If accounts.Count <= 1 Then
                     ' One account (or none yet): one row with the person's name
                     Dim f As MemberFigures = If(accounts.Count = 1, FiguresOf(sums, accounts(0).Id), FiguresOf(sums, p.Id))
@@ -3483,6 +3643,10 @@ Partial Class ExpensesAndDebtsWShop
             ShowAccMsg("Please pick a member.", True)
             Return
         End If
+        If IsShopCustomer(person.Id) Then
+            ShowAccMsg(person.Name & " is a shop: it has its five accounts only.", True)
+            Return
+        End If
         If accName = "" Then
             ShowAccMsg("Please enter the account name.", True)
             Return
@@ -3574,7 +3738,8 @@ Partial Class ExpensesAndDebtsWShop
             If it IsNot Nothing Then ddlAccMember.SelectedValue = it.Value
 
             Dim person As Member = AccPerson()
-            btnAccNew.Enabled = (person IsNot Nothing)
+            btnAccNew.Enabled = (person IsNot Nothing AndAlso Not IsShopCustomer(person.Id))   ' a shop: its five accounts only
+            btnAccNew.ToolTip = If(person IsNot Nothing AndAlso IsShopCustomer(person.Id), "A shop has its five accounts only", "")
             If person Is Nothing Then
                 pnlAccNew.Visible = False
                 pnlAccRename.Visible = False
@@ -3591,7 +3756,7 @@ Partial Class ExpensesAndDebtsWShop
                 Dim net As Decimal = Math.Round(Bal(FiguresOf(sums, a.Id)), 3)
                 rows.Add(New AccRow With {.Id = a.Id, .Name = ShortAccountName(a), .TypeText = AccountTypeOf(a.Id),
                                           .IsLoan = (AccountTypeOf(a.Id) = AccTypeLoan), .BalanceText = Money(net),
-                                          .CanDelete = (net = 0D AndAlso accounts.Count > 1),
+                                          .CanDelete = (net = 0D AndAlso accounts.Count > 1 AndAlso Not IsShopCustomer(person.Id)),
                                           .CanSetBalance = True,
                                           .BalanceAction = If(IsSpentAccount(a), "Set Spent", If(IsHaveAccount(a), "Set Limit", "Set Balance"))})
                 ' A loan's _Have: its limit next to the type
@@ -3863,6 +4028,10 @@ Partial Class ExpensesAndDebtsWShop
             Return
         End If
         Dim shortName As String = ShortAccountName(a)
+        If IsShopCustomer(person.Id) Then
+            ShowAccMsg(person.Name & " is a shop: its five accounts cannot be deleted.", True)
+            Return
+        End If
         If AccountsOfPerson(person.Id).Count <= 1 Then
             ShowAccMsg("""" & shortName & """ is " & person.Name & "'s only account, so it cannot be deleted.", True)
             Return

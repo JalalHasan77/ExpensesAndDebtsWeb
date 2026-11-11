@@ -868,6 +868,7 @@ fieldset.tx-acc.loan > legend { color: #c2410c; }
         /* ---------- Member groups: filter in the Order grid's corner, checkboxes in Add New Member ---------- */
         .order-grid td.grp-cell { text-align: left; vertical-align: middle; padding: 3px 6px; }
         .grp-filter { width: 100%; max-width: 260px; padding: 3px 6px; font-size: 13px; border: 1px solid #94a3b8; border-radius: 4px; background: #fff; }
+        .shop-filter { display: block; margin-top: 4px; border-color: #b45309; color: #92400e; }
         .grp-row { align-items: flex-start; }
         .grp-box { display: flex; flex-direction: column; gap: 8px; }
         .grp-checks label { margin: 0 14px 0 4px; }
@@ -989,6 +990,20 @@ fieldset.tx-acc.loan > legend { color: #c2410c; }
             }
             return false;
         }
+
+        // Add New Member: an Individual has all the fields; a Shop only its name
+        function edMemberKind() {
+            var ddl = document.getElementById('ddlNewMemberKind');
+            if (!ddl) { return; }
+            var shop = ddl.value === 'Shop';
+            var rows = document.querySelectorAll('.ind-only'), i;
+            for (i = 0; i < rows.length; i++) { rows[i].style.display = shop ? 'none' : ''; }
+            var notes = document.querySelectorAll('.shop-only');
+            for (i = 0; i < notes.length; i++) { notes[i].style.display = shop ? '' : 'none'; }
+            var lbl = document.getElementById('newMemberNameLbl');
+            if (lbl) { lbl.textContent = shop ? 'Shop name:' : 'Member:'; }
+        }
+        if (window.addEventListener) { window.addEventListener('load', edMemberKind); }
 
         // Transactions: hide / show the ex columns (remembered in hfTxEx between postbacks)
         function edApplyTxEx() {
@@ -1487,19 +1502,25 @@ fieldset.tx-acc.loan > legend { color: #c2410c; }
                                                                 <asp:Panel ID="pnlAddMember" runat="server" CssClass="modal-back" Visible="false">
                                                                     <div class="modal-box">
                                                                         <h3>Add New Member</h3>
-                                                                        <div class="modal-row"><span class="lbl">Member:</span><asp:TextBox ID="txtNewMemberName" runat="server" CssClass="txt-input" /></div>
-                                                                        <div class="modal-row"><span class="lbl">Staff ID:</span><asp:TextBox ID="txtNewMemberStaffId" runat="server" CssClass="txt-input" MaxLength="50" placeholder="Windows login, e.g. 2271" /></div>
-                                                                        <div class="modal-row"><span class="lbl">Mobile No:</span><asp:TextBox ID="txtNewMemberMobile" runat="server" CssClass="txt-input" MaxLength="30" TextMode="Phone" placeholder="e.g. 36001234" /></div>
-                                                                        <div class="modal-row"><span class="lbl">CPR:</span><asp:TextBox ID="txtNewMemberCpr" runat="server" CssClass="txt-input" MaxLength="11" inputmode="numeric" placeholder="9 digits" /></div>
-                                                                        <div class="modal-row"><span class="lbl">Email:</span><asp:TextBox ID="txtNewMemberEmail" runat="server" CssClass="txt-input" MaxLength="100" TextMode="Email" placeholder="name@example.com" /></div>
-                                                                        <div class="modal-row"><span class="lbl">Balance:</span><asp:TextBox ID="txtNewMemberBalance" runat="server" CssClass="txt-input" TextMode="Number" step="0.001" onfocus="this.select();" /></div>
-                                                                        <div class="modal-row"><span class="lbl">Status:</span>
+                                                                        <div class="modal-row"><span class="lbl">Customer Type:</span>
+                                                                            <asp:DropDownList ID="ddlNewMemberKind" runat="server" ClientIDMode="Static" CssClass="ddl-input" onchange="edMemberKind();">
+                                                                                <asp:ListItem Text="Individual" Value="Individual" Selected="True" />
+                                                                                <asp:ListItem Text="Shop" Value="Shop" />
+                                                                            </asp:DropDownList></div>
+                                                                        <div class="modal-row"><span class="lbl" id="newMemberNameLbl">Member:</span><asp:TextBox ID="txtNewMemberName" runat="server" CssClass="txt-input" /></div>
+                                                                        <div class="modal-note shop-only" id="newShopNote">The shop gets five accounts: <b>&lt;Shop&gt;_Budget</b>, <b>_Cash</b>, <b>_Loss</b>, <b>_Profit</b> and <b>_Stock</b> (no others can be added).</div>
+                                                                        <div class="modal-row ind-only"><span class="lbl">Staff ID:</span><asp:TextBox ID="txtNewMemberStaffId" runat="server" CssClass="txt-input" MaxLength="50" placeholder="Windows login, e.g. 2271" /></div>
+                                                                        <div class="modal-row ind-only"><span class="lbl">Mobile No:</span><asp:TextBox ID="txtNewMemberMobile" runat="server" CssClass="txt-input" MaxLength="30" TextMode="Phone" placeholder="e.g. 36001234" /></div>
+                                                                        <div class="modal-row ind-only"><span class="lbl">CPR:</span><asp:TextBox ID="txtNewMemberCpr" runat="server" CssClass="txt-input" MaxLength="11" inputmode="numeric" placeholder="9 digits" /></div>
+                                                                        <div class="modal-row ind-only"><span class="lbl">Email:</span><asp:TextBox ID="txtNewMemberEmail" runat="server" CssClass="txt-input" MaxLength="100" TextMode="Email" placeholder="name@example.com" /></div>
+                                                                        <div class="modal-row ind-only"><span class="lbl">Balance:</span><asp:TextBox ID="txtNewMemberBalance" runat="server" CssClass="txt-input" TextMode="Number" step="0.001" onfocus="this.select();" /></div>
+                                                                        <div class="modal-row ind-only"><span class="lbl">Status:</span>
                                                                             <asp:DropDownList ID="ddlNewMemberStatus" runat="server" CssClass="ddl-input">
                                                                                 <asp:ListItem Text="Active" Value="Active" Selected="True" />
                                                                                 <asp:ListItem Text="Frozen (suspended / inactive)" Value="Frozen" />
                                                                             </asp:DropDownList></div>
-                                                                        <div class="modal-row grp-row"><span class="lbl">Comment:</span><asp:TextBox ID="txtNewMemberComment" runat="server" CssClass="txt-input mm-comment-new" TextMode="MultiLine" Rows="2" MaxLength="1000" placeholder="Optional note about this member" /></div>
-                                                                        <div class="modal-row grp-row"><span class="lbl">Groups:</span>
+                                                                        <div class="modal-row grp-row ind-only"><span class="lbl">Comment:</span><asp:TextBox ID="txtNewMemberComment" runat="server" CssClass="txt-input mm-comment-new" TextMode="MultiLine" Rows="2" MaxLength="1000" placeholder="Optional note about this member" /></div>
+                                                                        <div class="modal-row grp-row ind-only"><span class="lbl">Groups:</span>
                                                                             <div class="grp-box">
                                                                                 <asp:CheckBoxList ID="cblNewMemberGroups" runat="server" CssClass="grp-checks" RepeatLayout="Flow" RepeatDirection="Horizontal" />
                                                                                 <div class="grp-new">
