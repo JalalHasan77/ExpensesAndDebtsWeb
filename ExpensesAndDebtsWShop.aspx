@@ -777,6 +777,73 @@ a.file-tile { text-decoration: none; cursor: pointer; }
 .acc-note { margin: 2px 0 6px 130px; font-size: 13px; color: #64748b; }
 .acc-hint { font-size: 12px; color: #64748b; }
 .items-grid tr.loan td { color: #c2410c; }
+/* =====================================================================
+   MATRICES: who must repay whom, who lent to whom (per person)
+   ===================================================================== */
+.mx-wrap { display: flex; flex-direction: column; gap: 18px; max-width: 520px; }
+fieldset.mx-person { border: 1px solid #cbd5e1; border-radius: 10px; background: #f8fafc; padding: 4px 16px 12px; margin: 0; }
+fieldset.mx-person > legend { padding: 0 8px; font-size: 16px; font-weight: 700; color: #1a1464; }
+.mx-list { border-collapse: collapse; width: 100%; font: 14px Calibri, Arial, sans-serif; }
+.mx-list td { padding: 3px 6px; white-space: nowrap; }
+.mx-list td.r { text-align: right; }
+.mx-list tr.head td { font-weight: 700; padding-top: 10px; border-bottom: 1px solid #e2e8f0; }
+.mx-list tr.head.repay td { color: #b91c1c; }
+.mx-list tr.head.lend td { color: #15803d; }
+.mx-list tr.part td.who { padding-left: 26px; }
+.mx-list td .via { font-size: 12px; color: #94a3b8; margin-left: 6px; }
+
+/* =====================================================================
+   MAIN DASHBOARD: people and their accounts' balances
+   ===================================================================== */
+.db-grid { border-collapse: collapse; font: 14px Calibri, Arial, sans-serif; min-width: 560px; }
+.db-grid th { background: #111827; color: #fff; padding: 7px 12px; text-align: left; white-space: nowrap; }
+.db-grid th.r, .db-grid td.r { text-align: right; }
+.db-grid td { padding: 6px 12px; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+.db-grid tr.person td { font-weight: 700; background: #eef2f7; }
+.db-grid tr.acc td { color: #475569; }
+.db-grid tr.acc td.name { padding-left: 34px; }
+.db-grid tr.acc.loan td.name { color: #c2410c; }
+.db-grid td .type { font-size: 12px; color: #94a3b8; margin-left: 6px; font-weight: 400; }
+.db-grid td .note { font-size: 12px; color: #94a3b8; margin-left: 6px; font-weight: 400; }
+.db-grid td.neg { color: #dc2626; }
+.db-grid tr.total td { font-weight: 700; background: #111827; color: #fff; }
+.db-grid tr.total td.neg { color: #fca5a5; }
+
+/* =====================================================================
+   TRANSACTIONS: the person, then one grid per account
+   ===================================================================== */
+.tx-person { border: 1px solid #cbd5e1; border-radius: 10px; background: #f8fafc; padding: 12px 16px; margin: 4px 0 18px; }
+.tx-person h2 { margin: 0 0 4px; font-size: 20px; color: #111827; }
+.tx-person .info { color: #475569; font-size: 13px; margin-bottom: 10px; }
+.tx-person .info span { margin-right: 18px; white-space: nowrap; }
+.tx-person .info b { color: #1e293b; }
+.tx-cards { display: flex; flex-wrap: wrap; gap: 10px; }
+.tx-card { width: 160px; height: 60px; display: flex; overflow: hidden; }
+.tx-card .bar { width: 5px; }
+.tx-card .body { padding: 6px 10px; }
+.tx-card .cap { color: #64748b; font: 700 12px Calibri, Arial, sans-serif; }
+.tx-card .val { font: 700 22px Calibri, Arial, sans-serif; margin-top: 2px; }
+.tx-card .val.neg { color: #b22222 !important; }
+.tx-cards.small .tx-card { width: 130px; height: 46px; }
+.tx-cards.small .tx-card .cap { font-size: 11px; }
+.tx-cards.small .tx-card .val { font-size: 17px; margin-top: 0; }
+fieldset.tx-acc { border: 1px solid #cbd5e1; border-radius: 10px; background: #f8fafc; padding: 6px 16px 14px; margin: 0 0 22px; min-width: 0; }
+fieldset.tx-acc > legend { padding: 0 8px; font-size: 16px; font-weight: 700; color: #1a1464; }
+fieldset.tx-acc > legend .type { font-size: 12px; font-weight: 400; color: #64748b; margin-left: 6px; }
+fieldset.tx-acc.loan > legend { color: #c2410c; }
+.tx-acc .tx-cards { margin: 4px 0 10px; }
+.tx-acc .tx-grid { background: #fff; }
+.tx-scroll { overflow-x: auto; }
+.tx-grid { border-collapse: collapse; font: 14px Calibri, Arial, sans-serif; }
+.tx-grid th { background: #111827; color: #fff; padding: 7px 9px; white-space: nowrap; text-align: left; }
+.tx-grid td { padding: 5px 9px; border-bottom: 1px solid #e2e8f0; vertical-align: top; white-space: nowrap; }
+.tx-grid td.r { text-align: right; }
+.tx-grid td.ex { background: #fffacd; }
+.tx-grid td.b { font-weight: 700; }
+.tx-grid td.neg { color: #dc2626; }
+.tx-grid td.items { line-height: 1.45; }
+.tx-wrap.hide-ex .exc { display: none; }
+
 .acc-grid td.acc-acts { white-space: nowrap; text-align: right; }
 .acc-grid .acc-act { color: #1a1464; font-weight: 700; font-size: 13px; text-decoration: none; margin-left: 12px; }
 .acc-grid .acc-act:hover { text-decoration: underline; }
@@ -922,6 +989,21 @@ a.file-tile { text-decoration: none; cursor: pointer; }
             }
             return false;
         }
+
+        // Transactions: hide / show the ex columns (remembered in hfTxEx between postbacks)
+        function edApplyTxEx() {
+            var wrap = document.getElementById('txWrap'), hf = document.getElementById('hfTxEx'), btn = document.getElementById('btnTxEx');
+            if (!wrap) { return; }
+            var hidden = hf && hf.value === '1';
+            wrap.className = hidden ? 'tx-wrap hide-ex' : 'tx-wrap';
+            if (btn) { btn.textContent = hidden ? 'Show ex columns' : 'Hide ex columns'; }
+        }
+        function edToggleTxEx() {
+            var hf = document.getElementById('hfTxEx');
+            if (hf) { hf.value = hf.value === '1' ? '0' : '1'; }
+            edApplyTxEx();
+        }
+        if (window.addEventListener) { window.addEventListener('load', edApplyTxEx); }
 
         // Split payment dialog: what was entered and what is left of the line's total
         function edSplitSum() {
@@ -1490,11 +1572,25 @@ a.file-tile { text-decoration: none; cursor: pointer; }
                                                         </asp:View>
                                                         <%-- ---------- Main Dashboard (empty) ---------- --%>
                                                         <asp:View ID="viewDashboard" runat="server">
-                                                            <div class="tab-body-inner"></div>
+                                                            <div class="tab-body-inner">
+                                                                <div class="filter-bar">
+                                                                    <span class="lbl">Group:</span>
+                                                                    <asp:DropDownList ID="ddlDashGroup" runat="server" CssClass="ddl-input" AutoPostBack="true" />
+                                                                </div>
+                                                                <asp:Label ID="lblDashMsg" runat="server" CssClass="order-msg err" Visible="false" />
+                                                                <asp:Literal ID="litDashboard" runat="server" />
+                                                            </div>
                                                         </asp:View>
                                                         <%-- ---------- Matrices (empty) ---------- --%>
                                                         <asp:View ID="viewMatrices" runat="server">
-                                                            <div class="tab-body-inner"></div>
+                                                            <div class="tab-body-inner">
+                                                                <div class="filter-bar">
+                                                                    <span class="lbl">Member:</span>
+                                                                    <asp:DropDownList ID="ddlMxMember" runat="server" CssClass="ddl-input" AutoPostBack="true" />
+                                                                </div>
+                                                                <asp:Label ID="lblMxMsg" runat="server" CssClass="order-msg err" Visible="false" />
+                                                                <asp:Literal ID="litMatrices" runat="server" />
+                                                            </div>
                                                         </asp:View>
                                                         <%-- ---------- Items ---------- --%>
                                                         <asp:View ID="viewItems" runat="server">
@@ -1511,7 +1607,21 @@ a.file-tile { text-decoration: none; cursor: pointer; }
                                                         </asp:View>
                                                         <%-- ---------- Transactions (empty) ---------- --%>
                                                         <asp:View ID="viewTransactions" runat="server">
-                                                            <div class="tab-body-inner"></div>
+                                                            <div class="tab-body-inner">
+                                                                <div class="filter-bar">
+                                                                    <span class="lbl">Member:</span>
+                                                                    <asp:DropDownList ID="ddlTxMember" runat="server" CssClass="ddl-input" AutoPostBack="true" />
+                                                                    <button type="button" id="btnTxEx" class="btn-op" onclick="edToggleTxEx();">Hide ex columns</button>
+                                                                </div>
+                                                                <asp:HiddenField ID="hfTxEx" runat="server" ClientIDMode="Static" />
+                                                                <asp:Label ID="lblTxMsg" runat="server" CssClass="order-msg err" Visible="false" />
+                                                                <div id="txWrap" class="tx-wrap">
+                                                                    <%-- The person: their details and the total of their accounts --%>
+                                                                    <asp:Literal ID="litTxPerson" runat="server" />
+                                                                    <%-- One grid per account --%>
+                                                                    <asp:Literal ID="litTransactions" runat="server" />
+                                                                </div>
+                                                            </div>
                                                         </asp:View>
                                                         <%-- ---------- Payment ---------- --%>
                                                         <asp:View ID="viewPayment" runat="server">

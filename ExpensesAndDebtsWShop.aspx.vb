@@ -10,7 +10,6 @@ Partial Class ExpensesAndDebtsWShop
 
     ' Views (MultiView3): 0 Order | 1 Main Dashboard | 2 Matrices | 3 Items | 4 Transactions | 5 Payment | 6 Accounts
     ' (the Accounts link is shown between Items and Transactions)
-    ' Main Dashboard, Matrices and Transactions are empty for now (tabs kept, no controls or code).
     ' Money: every balance comes from the ledger (Ledger.Core in Bin; Accounts / Journals / Entries in Orders.mdb),
     ' the same library as the desktop form, so both apps calculate and save orders the same way.
     ' Accounts are the real members: each is a ledger member "<Person> - <Account>" (Members.Owner_ID = the person,
@@ -944,6 +943,9 @@ Partial Class ExpensesAndDebtsWShop
         lblPayMsg.Visible = False
         lblPayVerifyMsg.Visible = False
         lblAccMsg.Visible = False
+        lblTxMsg.Visible = False
+        lblDashMsg.Visible = False
+        lblMxMsg.Visible = False
         If Not Page.IsPostBack Then
             If Not String.IsNullOrEmpty(Request("ID")) Then lblID.Text = Request("ID")
             If Not String.IsNullOrEmpty(Request("mode")) Then lblMode.Text = Request("mode")
@@ -984,7 +986,7 @@ Partial Class ExpensesAndDebtsWShop
         Dim problem As String = LedgerProblem()
         If IsAdmin AndAlso problem = "" Then RenderMembersList()
         If problem <> "" Then
-            For Each lbl As Label In {lblOrderMsg, lblItemsMsg, lblPayMsg, lblAccMsg}
+            For Each lbl As Label In {lblOrderMsg, lblItemsMsg, lblPayMsg, lblAccMsg, lblTxMsg, lblDashMsg, lblMxMsg}
                 lbl.Text = Server.HtmlEncode(problem)
                 lbl.CssClass = "order-msg err"
                 lbl.Visible = True
@@ -1000,6 +1002,9 @@ Partial Class ExpensesAndDebtsWShop
             Case ItemsTabIndex : RefreshItems()
             Case PaymentTabIndex : RefreshPayment()
             Case AccountsTabIndex : RefreshAccounts()
+            Case TransactionsTabIndex : RefreshTransactions()
+            Case DashboardTabIndex : RefreshDashboard()
+            Case MatricesTabIndex : RefreshMatrices()
         End Select
         ApplyReadOnlyMode()
     End Sub
@@ -3011,6 +3016,386 @@ Partial Class ExpensesAndDebtsWShop
         sb.AppendFormat("<tr class=""total""><td>Total</td><td class=""r"">{0}</td><td class=""r"">{1}</td></tr></table>",
                         Qty(totalQty), Money(totalAmount))
         litItems.Text = sb.ToString()
+    End Sub
+
+    ' ====================================================================
+    '  MATRICES (administrator): who must repay whom, and who lent to whom, per person
+    '  From the ledger's debts between accounts (PairwiseDebts: lender -> borrower -> amount), added up per
+    '  person (an account counts for its owner). When two people owe each other, only the difference shows.
+    '    <Person> Repay: (total)    the people they owe, each with the amount
+    '    <Person> Lend:  (total)    the people who owe them, each with the amount
+    '  A Member list (All first) shows one person only.
+    ' ====================================================================
+
+    ''' <summary>The person an account belongs to (anyone else: themselves).</summary>
+    Private Function PersonOf(memberId As String) As String
+        Dim owner As String = OwnerOf(memberId)
+        Return If(owner <> "", owner, memberId)
+    End Function
+
+    Private Sub RefreshMatrices()
+        litMatrices.Text = ""
+        Try
+            ' Member list: All, then the people (keeps the pick)
+            Dim current As String = ddlMxMember.SelectedValue
+            ddlMxMember.Items.Clear()
+            ddlMxMember.Items.Add(New ListItem("All", ""))
+            For Each m As Member In LedgerMembers().Where(Function(x) x.IsActive AndAlso x.MemberType <> MemberTypes.Bank AndAlso Not IsAccountMember(x)).
+                                                    OrderBy(Function(x) x.Name)
+                ddlMxMember.Items.Add(New ListItem(m.Name, m.Id))
+            Next
+            Dim it As ListItem = ddlMxMember.Items.FindByValue(If(current, ""))
+            If it IsNot Nothing Then ddlMxMember.SelectedValue = it.Value
+            Dim only As String = ddlMxMember.SelectedValue
+
+            ' Debts per pair of people (lender, borrower) and, per pair, which of the lender's accounts lent how much
+            Dim owed As New Dictionary(Of String, Decimal)(StringComparer.OrdinalIgnoreCase)          ' "lender|borrower" -> amount
+            Dim byAccount As New Dictionary(Of String, Dictionary(Of String, Decimal))(StringComparer.OrdinalIgnoreCase)
+            For Each c As FlowCell In LQ().PairwiseDebts()
+                If c.Amount = 0D Then Continue For
+                Dim lender As String = PersonOf(c.FromId), borrower As String = PersonOf(c.ToId)
+                If SameName(lender, borrower) Then Continue For   ' between one person's own accounts
+                Dim key As String = lender & "|" & borrower
+                owed(key) = If(owed.ContainsKey(key), owed(key), 0D) + c.Amount
+                If Not byAccount.ContainsKey(key) Then byAccount(key) = New Dictionary(Of String, Decimal)(StringComparer.OrdinalIgnoreCase)
+                byAccount(key)(c.FromId) = If(byAccount(key).ContainsKey(c.FromId), byAccount(key)(c.FromId), 0D) + c.Amount
+            Next
+            ' Net out: when two people owe each other, keep only the difference
+            Dim net As New Dictionary(Of String, Decimal)(StringComparer.OrdinalIgnoreCase)
+            For Each kv As KeyValuePair(Of String, Decimal) In owed
+                Dim parts As String() = kv.Key.Split("|"c)
+                Dim back As String = parts(1) & "|" & parts(0)
+                Dim amount As Decimal = Math.Round(kv.Value - If(owed.ContainsKey(back), owed(back), 0D), 3)
+                If amount > 0D Then net(kv.Key) = amount
+            Next
+
+            Dim people As List(Of String) = net.Keys.SelectMany(Function(k) k.Split("|"c)).Distinct(StringComparer.OrdinalIgnoreCase).
+                                                OrderBy(Function(id) LedgerName(id)).ToList()
+            If only <> "" Then people = people.Where(Function(id) SameName(id, only)).ToList()
+
+            Dim sb As New System.Text.StringBuilder("<div class=""mx-wrap"">")
+            For Each pid As String In people
+                Dim personId As String = pid
+                Dim repay As List(Of KeyValuePair(Of String, Decimal)) = net.Where(Function(kv) SameName(kv.Key.Split("|"c)(1), personId)).
+                                                                             OrderBy(Function(kv) LedgerName(kv.Key.Split("|"c)(0))).ToList()
+                Dim lend As List(Of KeyValuePair(Of String, Decimal)) = net.Where(Function(kv) SameName(kv.Key.Split("|"c)(0), personId)).
+                                                                            OrderBy(Function(kv) LedgerName(kv.Key.Split("|"c)(1))).ToList()
+                If repay.Count = 0 AndAlso lend.Count = 0 Then Continue For
+                Dim name As String = Server.HtmlEncode(LedgerName(personId))
+                sb.Append("<fieldset class=""mx-person""><legend>").Append(name).Append("</legend><table class=""mx-list"">")
+                ' Two titles under the person's name: Lend (who owes them) and Repay (whom they owe)
+                sb.AppendFormat("<tr class=""head lend""><td>Lend</td><td class=""r"">{0}</td></tr>",
+                                If(lend.Count = 0, "&ndash;", "(" & Money(lend.Sum(Function(kv) kv.Value)) & ")"))
+                For Each kv As KeyValuePair(Of String, Decimal) In lend
+                    sb.AppendFormat("<tr class=""part""><td class=""who"">{0}{1}</td><td class=""r"">{2}</td></tr>",
+                                    Server.HtmlEncode(LedgerName(kv.Key.Split("|"c)(1))), ViaText(byAccount, kv.Key, personId), Money(kv.Value))
+                Next
+                sb.AppendFormat("<tr class=""head repay""><td>Repay</td><td class=""r"">{0}</td></tr>",
+                                If(repay.Count = 0, "&ndash;", "(" & Money(repay.Sum(Function(kv) kv.Value)) & ")"))
+                For Each kv As KeyValuePair(Of String, Decimal) In repay
+                    Dim lender As String = kv.Key.Split("|"c)(0)
+                    sb.AppendFormat("<tr class=""part""><td class=""who"">{0}{1}</td><td class=""r"">{2}</td></tr>",
+                                    Server.HtmlEncode(LedgerName(lender)), ViaText(byAccount, kv.Key, lender), Money(kv.Value))
+                Next
+                sb.Append("</table></fieldset>")
+            Next
+            sb.Append("</div>")
+            litMatrices.Text = If(people.Count = 0, "<div class=""tab-note"">" & If(only = "", "Nobody owes anybody.", "Nothing to repay or lend for this member.") & "</div>",
+                                  sb.ToString())
+        Catch ex As Exception
+            lblMxMsg.Text = Server.HtmlEncode("Could not read the debts: " & ex.Message)
+            lblMxMsg.Visible = True
+        End Try
+    End Sub
+
+    ''' <summary>"via BBK_0117 12.000, Cash 8.000": which of the lender's accounts lent, when more than one did.</summary>
+    Private Function ViaText(byAccount As Dictionary(Of String, Dictionary(Of String, Decimal)), key As String, lenderId As String) As String
+        If Not byAccount.ContainsKey(key) Then Return ""
+        Dim accs As List(Of KeyValuePair(Of String, Decimal)) = byAccount(key).Where(Function(kv) kv.Value <> 0D).ToList()
+        If accs.Count < 2 Then Return ""
+        Return "<span class=""via"">via " & Server.HtmlEncode(String.Join(", ", accs.Select(Function(kv)
+                                                                                                   Dim m As Member = LedgerMembers().FirstOrDefault(Function(x) SameName(x.Id, kv.Key))
+                                                                                                   Return If(m Is Nothing, kv.Key, ShortAccountName(m)) & " " & Money(kv.Value)
+                                                                                               End Function))) & "</span>"
+    End Function
+
+    ' ====================================================================
+    '  MAIN DASHBOARD (administrator)
+    '  Pick a group (All first) -> every person in it with their balance. A person with several accounts:
+    '  a total row (all their accounts) and each account under it; with one account: one row.
+    '  Balance = money held - money owed (see Bal). Then the shop, and the total of everyone listed.
+    ' ====================================================================
+
+    Private Sub RefreshDashboard()
+        litDashboard.Text = ""
+        Try
+            ' Groups, "All" first (keeps the pick)
+            Dim current As String = ddlDashGroup.SelectedValue
+            ddlDashGroup.Items.Clear()
+            ddlDashGroup.Items.Add(New ListItem("All", "0"))
+            For Each g As MemberGroup In GroupList().OrderBy(Function(x) x.Name)
+                ddlDashGroup.Items.Add(New ListItem(g.Name, g.Id.ToString(CultureInfo.InvariantCulture)))
+            Next
+            Dim it As ListItem = ddlDashGroup.Items.FindByValue(If(current, ""))
+            If it IsNot Nothing Then ddlDashGroup.SelectedValue = it.Value
+            Dim groupId As Integer = 0
+            Integer.TryParse(ddlDashGroup.SelectedValue, groupId)
+
+            Dim sums As Dictionary(Of String, MemberFigures) = SummariesById()
+            Dim people As List(Of Member) = LedgerMembers().Where(Function(m) m.IsActive AndAlso IsPerson(m) AndAlso
+                                                                              (groupId = 0 OrElse (m.GroupIds IsNot Nothing AndAlso m.GroupIds.Contains(groupId)))).
+                                                            OrderBy(Function(m) m.Name).ToList()
+            Dim sb As New System.Text.StringBuilder("<table class=""db-grid""><tr><th>Member</th><th class=""r"">Balance</th>" &
+                                                    "<th class=""r"">Cash</th><th class=""r"">Receivable</th><th class=""r"">Payable</th></tr>")
+            Dim grand As New MemberFigures
+            Dim row As Action(Of String, String, MemberFigures, String) =
+                Sub(cssClass, nameHtml, f, title)
+                    Dim balance As Decimal = Bal(f)
+                    sb.AppendFormat("<tr class=""{0}""{1}><td class=""name"">{2}</td><td class=""r{3}"">{4}</td><td class=""r"">{5}</td><td class=""r"">{6}</td><td class=""r"">{7}</td></tr>",
+                                    cssClass, If(title = "", "", " title=""" & Server.HtmlEncode(title) & """"), nameHtml,
+                                    If(balance < 0D, " neg", ""), Money(balance), Money(CashOf(f)), Money(f.OwedToThem), Money(f.TheyOwe))
+                End Sub
+
+            For Each p As Member In people
+                Dim accounts As List(Of Member) = AccountsOfPerson(p.Id)
+                Dim frozenNote As String = If(p.IsFrozen, "<span class=""note"">(frozen)</span>", "")
+                If accounts.Count <= 1 Then
+                    ' One account (or none yet): one row with the person's name
+                    Dim f As MemberFigures = If(accounts.Count = 1, FiguresOf(sums, accounts(0).Id), FiguresOf(sums, p.Id))
+                    row("person", Server.HtmlEncode(p.Name) & frozenNote, f, If(accounts.Count = 1, accounts(0).Name, ""))
+                    grand = Plus(grand, f)
+                    Continue For
+                End If
+                ' Several accounts: the total first, then each account
+                Dim total As MemberFigures = PersonFigures(sums, p.Id)
+                row("person", Server.HtmlEncode(p.Name) & frozenNote & "<span class=""note"">" & accounts.Count & " accounts</span>", total, "")
+                grand = Plus(grand, total)
+                For Each a As Member In accounts
+                    Dim isLoan As Boolean = AccountTypeOf(a.Id) = AccTypeLoan
+                    row("acc" & If(isLoan, " loan", ""), Server.HtmlEncode(ShortAccountName(a)) &
+                        "<span class=""type"">" & Server.HtmlEncode(AccountTypeOf(a.Id)) & "</span>", FiguresOf(sums, a.Id), a.Name)
+                Next
+            Next
+
+            ' The shop (all groups only)
+            If groupId = 0 Then
+                For Each s As Member In LedgerMembers().Where(Function(m) m.IsActive AndAlso m.MemberType = MemberTypes.Shop)
+                    Dim f As MemberFigures = FiguresOf(sums, s.Id)
+                    row("person", Server.HtmlEncode(s.Name) & "<span class=""note"">shop</span>", f, "")
+                    grand = Plus(grand, f)
+                Next
+            End If
+
+            If people.Count = 0 Then
+                sb.Append("<tr><td colspan=""5"" class=""tab-note"">Nobody in this group.</td></tr>")
+            Else
+                row("total", "TOTAL (" & people.Count & If(people.Count = 1, " member", " members") & ")", grand, "")
+            End If
+            sb.Append("</table>")
+            litDashboard.Text = sb.ToString()
+        Catch ex As Exception
+            lblDashMsg.Text = Server.HtmlEncode("Could not read the balances: " & ex.Message)
+            lblDashMsg.Visible = True
+        End Try
+    End Sub
+
+    ' ====================================================================
+    '  TRANSACTIONS (from the ledger)
+    '  Pick a person -> their details and the total of their accounts (cards), then one grid per account:
+    '  every journal that touched the account, newest first (orders with their items, Credit, Withdraw and
+    '  payer, what it paid for others, deposits, cancellations ...). The ex columns can be hidden.
+    '  Other users see only their own.
+    ' ====================================================================
+
+    ' caption | main colour | light background
+    Private Shared ReadOnly TxCards As String()() = {
+        New String() {"BALANCE", "#111827", "#e8ecf4"},
+        New String() {"CASH", "#15803d", "#e2f5e9"},
+        New String() {"RECEIVABLE", "#1d4ed8", "#e1ecfc"},
+        New String() {"PAYABLE", "#c2410c", "#feebde"},
+        New String() {"EXPENSE", "#7e22ce", "#f0e6fc"},
+        New String() {"ORDERS", "#475569", "#eceff3"}}
+
+    Private Function TxCardsHtml(f As MemberFigures, orders As Integer, small As Boolean) As String
+        Dim values As Decimal() = {Bal(f), CashOf(f), f.OwedToThem, f.TheyOwe, f.Expense, orders}
+        Dim sb As New System.Text.StringBuilder("<div class=""tx-cards" & If(small, " small", "") & """>")
+        For i As Integer = 0 To TxCards.Length - 1
+            Dim c As String() = TxCards(i)
+            Dim v As Decimal = values(i)
+            Dim isOrders As Boolean = (c(0) = "ORDERS")
+            sb.AppendFormat("<div class=""tx-card"" style=""background:{0}""><div class=""bar"" style=""background:{1}""></div>" &
+                            "<div class=""body""><div class=""cap"">{2}</div><div class=""val{3}"" style=""color:{1}"">{4}</div></div></div>",
+                            c(2), c(1), c(0), If(Not isOrders AndAlso v < 0D, " neg", ""),
+                            If(isOrders, v.ToString("0", CultureInfo.InvariantCulture), Money(v)))
+        Next
+        sb.Append("</div>")
+        Return sb.ToString()
+    End Function
+
+    Private Sub RefreshTransactions()
+        litTxPerson.Text = ""
+        litTransactions.Text = ""
+        If hfTxEx.Value = "" Then hfTxEx.Value = "0"
+        Try
+            FillMemberFilter(ddlTxMember, "[Select A Member]", "")
+        Catch ex As Exception
+            lblTxMsg.Text = Server.HtmlEncode("Could not read the members: " & ex.Message)
+            lblTxMsg.Visible = True
+            Return
+        End Try
+
+        ' Other users see only their own transactions: the list is fixed to them and locked
+        ddlTxMember.Enabled = IsAdmin
+        If Not IsAdmin Then
+            Dim own As ListItem = ddlTxMember.Items.FindByValue(CurrentMemberId)
+            ddlTxMember.ClearSelection()
+            If own IsNot Nothing Then
+                own.Selected = True
+            Else
+                lblTxMsg.Text = Server.HtmlEncode(NotRegisteredText())
+                lblTxMsg.Visible = True
+                Return
+            End If
+        End If
+
+        Dim personId As String = ddlTxMember.SelectedValue
+        If personId = "" Then Return   ' "[Select A Member]"
+        Dim person As Member = LedgerMembers().FirstOrDefault(Function(m) SameName(m.Id, personId))
+        If person Is Nothing Then Return
+
+        Try
+            Dim q As LedgerQueries = LQ()
+            ' The person's accounts (a person without accounts, or the shop: itself)
+            Dim accounts As List(Of Member) = If(IsPerson(person), AccountsOfPerson(person.Id), New List(Of Member))
+            If accounts.Count = 0 Then accounts = New List(Of Member) From {person}
+            Dim ids As List(Of String) = accounts.Select(Function(a) a.Id).ToList()
+            Dim statements As New Dictionary(Of String, List(Of StatementLine))(StringComparer.OrdinalIgnoreCase)
+            For Each id As String In ids
+                statements(id) = q.Statement(id)
+            Next
+
+            ' Orders: date / time / title; each account's lines (Credit, Withdraw, payer) and items; what it paid for others
+            Dim orderInfo As New Dictionary(Of String, String())
+            For Each o As DataRow In OrdersDB.GetDataTable("SELECT * FROM Orders").Rows
+                orderInfo(o("Order_ID").ToString()) = New String() {ColText(o, "Order_Date"), ColText(o, "Order_No"), ColText(o, "Order_Title")}
+            Next
+            Dim inList As String = String.Join(", ", ids.Select(Function(x) OrdersDB.SqlText(x)))
+            Dim oms As DataTable = OrdersDB.GetDataTable("SELECT * FROM Order_Members WHERE Member_ID IN (" & inList & ") OR Account_ID IN (" & inList & ")")
+            Dim omis As DataTable = OrdersDB.GetDataTable(
+                "SELECT omi.Order_ID, omi.Member_ID, oi.Item_Name, omi.Quantity, oi.Unit_Price " &
+                "FROM Order_Member_Items AS omi INNER JOIN Order_Items AS oi ON omi.OrderItem_ID = oi.OrderItem_ID " &
+                "WHERE omi.Member_ID IN (" & inList & ")")
+
+            ' The person: details and the total of all their accounts
+            Dim total As New MemberFigures With {.MemberId = person.Id}
+            For Each id As String In ids
+                total = Plus(total, q.Summary(id))
+            Next
+            Dim allOrders As Integer = statements.Values.SelectMany(Function(s) s).
+                Where(Function(s) s.Journal.JournalType = JournalTypes.Order AndAlso s.Journal.OrderId <> "").
+                Select(Function(s) s.Journal.OrderId).Distinct().Count()
+            Dim groupNames As String = String.Join(", ", GroupList().Where(Function(g) person.GroupIds IsNot Nothing AndAlso person.GroupIds.Contains(g.Id)).Select(Function(g) g.Name))
+            Dim info As New List(Of String)
+            info.Add("<span>Member ID: <b>" & Server.HtmlEncode(person.Id) & "</b></span>")
+            If Convert.ToString(person.StaffId) <> "" Then info.Add("<span>Staff ID: <b>" & Server.HtmlEncode(Convert.ToString(person.StaffId)) & "</b></span>")
+            If Convert.ToString(person.Mobile) <> "" Then info.Add("<span>Mobile: <b>" & Server.HtmlEncode(person.Mobile) & "</b></span>")
+            If Convert.ToString(person.Email) <> "" Then info.Add("<span>Email: <b>" & Server.HtmlEncode(person.Email) & "</b></span>")
+            If groupNames <> "" Then info.Add("<span>Groups: <b>" & Server.HtmlEncode(groupNames) & "</b></span>")
+            info.Add("<span>Status: <b>" & Server.HtmlEncode(If(person.IsFrozen, "Frozen", "Active")) & "</b></span>")
+            info.Add("<span>Accounts: <b>" & Server.HtmlEncode(String.Join(", ", accounts.Select(Function(a) ShortAccountName(a)))) & "</b></span>")
+            litTxPerson.Text = "<div class=""tx-person""><h2>" & Server.HtmlEncode(person.Name) & "</h2>" &
+                               "<div class=""info"">" & String.Join("", info) & "</div>" & TxCardsHtml(total, allOrders, False) & "</div>"
+
+            ' One grid per account
+            Dim headers As String() = {"Date &amp; Time", "Order ID", "Title", "Type", "Account",
+                                       "exBalance", "exCash", "exExpense", "exReceivable", "exPayable",
+                                       "Credit", "Withdraw", "Items", "Items Amount", "NewBalance",
+                                       "Cash", "Expense", "Receivable", "Payable"}
+            Dim exCols As New HashSet(Of Integer) From {5, 6, 7, 8, 9}
+            Dim sb As New System.Text.StringBuilder()
+            For Each a As Member In accounts
+                Dim statement As List(Of StatementLine) = statements(a.Id)
+                Dim isLoan As Boolean = AccountTypeOf(a.Id) = AccTypeLoan
+                Dim typeText As String = If(SameName(a.Id, person.Id), "", If(AccountTypeOf(a.Id) = "", AccTypeCapital, AccountTypeOf(a.Id)))
+                Dim accOrders As Integer = statement.Where(Function(s) s.Journal.JournalType = JournalTypes.Order).Count()
+                ' A group box per account: its name (and type) on the top border, its own cards, then its grid
+                sb.Append("<fieldset class=""tx-acc").Append(If(isLoan, " loan", "")).Append(""">")
+                sb.Append("<legend>").Append(Server.HtmlEncode(ShortAccountName(a)))
+                If typeText <> "" Then sb.Append("<span class=""type"">").Append(Server.HtmlEncode(typeText)).Append("</span>")
+                sb.Append("</legend>").Append(TxCardsHtml(q.Summary(a.Id), accOrders, True))
+
+                sb.Append("<div class=""tx-scroll""><table class=""tx-grid""><tr>")
+                For i As Integer = 0 To headers.Length - 1
+                    sb.Append("<th").Append(If(exCols.Contains(i), " class=""exc""", "")).Append(">").Append(headers(i)).Append("</th>")
+                Next
+                sb.Append("</tr>")
+
+                For Each sl As StatementLine In Enumerable.Reverse(statement)
+                    Dim j As Journal = sl.Journal
+                    Dim b As MemberFigures = Minus(sl.After, sl.Change)
+                    Dim oi As String() = Nothing
+                    Dim isOrder As Boolean = j.JournalType = JournalTypes.Order AndAlso j.OrderId <> "" AndAlso orderInfo.TryGetValue(j.OrderId, oi)
+
+                    Dim lines As New List(Of String)
+                    Dim credit As Decimal = 0D, debt As Decimal = 0D
+                    Dim payers As New List(Of String)
+                    Dim accId As String = a.Id
+                    Dim orderId As String = j.OrderId
+                    If isOrder Then
+                        For Each it As DataRow In omis.Rows.Cast(Of DataRow)().Where(Function(r) r("Order_ID").ToString() = orderId AndAlso SameName(r("Member_ID").ToString(), accId))
+                            lines.Add(SavedItemLine(ColText(it, "Item_Name"), DbDecimal(it("Quantity")), DbDecimal(it("Unit_Price"))))
+                        Next
+                        For Each om As DataRow In oms.Rows.Cast(Of DataRow)().Where(Function(r) r("Order_ID").ToString() = orderId)
+                            Dim lineMember As String = om("Member_ID").ToString()
+                            Dim payer As String = ColText(om, "Account_ID").Trim()
+                            If SameName(lineMember, accId) Then
+                                ' This account's own line(s): Credit, Withdraw, who paid
+                                credit += DbDecimal(om("Credit")) : debt += DbDecimal(om("Withdraw"))
+                                If payer <> "" AndAlso Not SameName(payer, accId) AndAlso Not payers.Contains(LedgerName(payer)) Then payers.Add(LedgerName(payer))
+                            ElseIf SameName(payer, accId) Then
+                                ' It paid for someone else
+                                lines.Add("Pays " & Money(DbDecimal(om("Items_Amount")) + DbDecimal(om("Withdraw"))) & " for " & LedgerName(lineMember))
+                            End If
+                        Next
+                        If debt <> 0D Then lines.Add("-Withdraw " & Money(debt))
+                        If credit <> 0D Then lines.Add("-Credit " & Money(credit))
+                    Else
+                        lines.AddRange(sl.Entries.Select(Function(x) x.Memo).Where(Function(x) x <> "").Distinct())
+                    End If
+
+                    Dim whenText As String = If(isOrder, (oi(0) & " " & oi(1)).Trim(), j.JournalDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))
+                    Dim titleText As String = If(isOrder, CleanTitle(oi(2)), j.Memo)
+                    Dim jType As String = j.JournalType & If(q.IsCancelled(j.Id), " (cancelled)", "")
+
+                    sb.Append("<tr>")
+                    sb.Append("<td>").Append(Server.HtmlEncode(whenText)).Append("</td>")
+                    sb.Append("<td>").Append(Server.HtmlEncode(j.OrderId)).Append("</td>")
+                    sb.Append("<td>").Append(Server.HtmlEncode(titleText)).Append("</td>")
+                    sb.Append("<td>").Append(Server.HtmlEncode(jType)).Append("</td>")
+                    sb.Append("<td>").Append(String.Join("<br />", payers.Select(Function(x) Server.HtmlEncode(x)))).Append("</td>")
+                    For Each v As Decimal In {Bal(b), CashOf(b), b.Expense, b.OwedToThem, b.TheyOwe}
+                        sb.Append("<td class=""r ex exc"">").Append(Money(v)).Append("</td>")
+                    Next
+                    sb.Append("<td class=""r"">").Append(Money(credit)).Append("</td>")
+                    sb.Append("<td class=""r"">").Append(Money(debt)).Append("</td>")
+                    sb.Append("<td class=""items"">").Append(String.Join("<br />", lines.Select(Function(l) Server.HtmlEncode(l)))).Append("</td>")
+                    sb.Append("<td class=""r"">").Append(Money(sl.Change.Expense)).Append("</td>")
+                    sb.Append("<td class=""r b").Append(If(Bal(sl.After) < 0D, " neg", "")).Append(""">").Append(Money(Bal(sl.After))).Append("</td>")
+                    For Each v As Decimal In {CashOf(sl.After), sl.After.Expense, sl.After.OwedToThem, sl.After.TheyOwe}
+                        sb.Append("<td class=""r b"">").Append(Money(v)).Append("</td>")
+                    Next
+                    sb.Append("</tr>")
+                Next
+                If statement.Count = 0 Then
+                    sb.Append("<tr><td colspan=""").Append(headers.Length).Append(""" class=""tab-note"">No transactions on this account yet.</td></tr>")
+                End If
+                sb.Append("</table></div></fieldset>")
+            Next
+            litTransactions.Text = sb.ToString()
+        Catch ex As Exception
+            lblTxMsg.Text = Server.HtmlEncode("Could not load transactions: " & ex.Message)
+            lblTxMsg.Visible = True
+        End Try
     End Sub
 
     ' ====================================================================
