@@ -1,4 +1,4 @@
-Imports System.Data
+﻿Imports System.Data
 Imports System.Collections.Generic
 Imports System.Globalization
 Imports System.Linq
@@ -95,6 +95,7 @@ Partial Class ExpensesAndDebtsWShop
         Public Property PaidFromOptions As New List(Of String)
         Public Property AccountLocked As Boolean
         Public Property TypeLocked As Boolean
+        Public Property Section As Integer          ' a shop order: 0 = the first grid (purchase), 1 = the second (profit, stock, members)
         Public Property NextBalance As Decimal?
         Public Property Cash As Decimal?
         Public Property Expense As Decimal?
@@ -1727,6 +1728,18 @@ Partial Class ExpensesAndDebtsWShop
         If e.Item.ItemType <> ListItemType.Item AndAlso e.Item.ItemType <> ListItemType.AlternatingItem Then Exit Sub
         Dim p As PreviewLine = CType(e.Item.DataItem, PreviewLine)
         CType(e.Item.FindControl("hfIdx"), HiddenField).Value = e.Item.ItemIndex.ToString()
+        ' A shop order: the second grid starts at its first row (same columns, under the first)
+        Dim litSection As Literal = CType(e.Item.FindControl("litSection"), Literal)
+        Dim prevRow As PreviewLine = If(e.Item.ItemIndex > 0, State.Preview(e.Item.ItemIndex - 1), Nothing)
+        If litSection IsNot Nothing AndAlso prevRow IsNot Nothing AndAlso p.Section > prevRow.Section Then
+            litSection.Text = "</table><div class=""pv-sec"">" &
+                {"", "After the purchase: profit, stock and members (from the new balances above)",
+                 "Not sold: from stock to loss (from the new balances above)",
+                 "Zeroing: profit and loss to the budget (from the new balances above)"}(p.Section) & "</div>" &
+                "<table class=""pv-grid""><tr><th>Member</th><th>exBalance</th><th>exCash</th><th>exExpense</th><th>exReceivable</th><th>exPayable</th>" &
+                "<th>Credit</th><th>Debt</th><th>OrderItems</th><th>Total</th><th>Account</th><th>Transaction Type</th><th>Paid From</th>" &
+                "<th>Next Balance</th><th>Cash</th><th>Expense</th><th>Receivable</th><th>Payable</th></tr>"
+        End If
 
         Dim ddlAccount As DropDownList = CType(e.Item.FindControl("ddlAccount"), DropDownList)
         Dim ddlType As DropDownList = CType(e.Item.FindControl("ddlType"), DropDownList)
@@ -1757,7 +1770,7 @@ Partial Class ExpensesAndDebtsWShop
 
         ' Split payment: the round + (an Expense row of a member); when split, the payers instead of the dropdowns
         Dim mline As MemberLine = State.Members.FirstOrDefault(Function(x) SameName(x.LineKey, p.LineKey))
-        Dim canSplit As Boolean = editable AndAlso IsAdmin AndAlso mline IsNot Nothing AndAlso Not mline.IsShopLine AndAlso p.TxType = TxNormal
+        Dim canSplit As Boolean = editable AndAlso IsAdmin AndAlso mline IsNot Nothing AndAlso Not mline.IsShopLine AndAlso p.TxType = TxNormal AndAlso Not p.AccountLocked
         lnkSplit.Visible = canSplit
         If canSplit AndAlso mline.Splits.Count > 0 Then
             ddlAccount.Visible = False
@@ -2294,6 +2307,422 @@ Partial Class ExpensesAndDebtsWShop
         Return TxNormal
     End Function
 
+    ' ====================================================================
+    '  SHOP ORDER (the grid has a Profits column and a shop is picked, and the order has items)
+    '  The Preview has two grids; Process posts both in one journal.
+    '  Grid 1 - the purchase (_Budget is not touched):
+    '    <Shop>_Cash  : "Pay X for:" the order total (items + Delivery + VAT); its balance goes up by X (-10 -> -6).
+    '    <Shop>_Stock : takes every item of the order; its balance goes down by X (0 -> -4).
+    '  Grid 2 - starting from the balances of grid 1:
+    '    <Shop>_Profit: credited the profit of everything sold to the members (the Profits column).
+    '    <Shop>_Stock : the items on its own row (not taken by members) go out of stock: its balance goes down by them.
+    '    the members  : as usual (items + Profits, Credit, Withdraw; payer / split as picked). Delivery and VAT were
+    '                   paid by _Cash in grid 1, so they are not charged again here.
+    '  Grid 3 - the items not sold (those on _Stock's own row), from grid 2's balances:
+    '    <Shop>_Loss  : withdraws their total (its balance goes down).
+    '    <Shop>_Stock : is credited their total (its balance goes up).
+    '  Grid 4 - Zeroing, from grid 3's balances:
+    '    <Shop>_Budget: gets Profit + Loss (the net: profit less the loss).
+    '    <Shop>_Profit: withdraws its balance, so it ends at zero.
+    '    <Shop>_Loss  : is credited its balance back, so it ends at zero.
+    ' ====================================================================
+
+    Private Class ShopOrderAccounts
+        Public ShopId As String = ""
+        Public Cash As MemberLine
+        Public Stock As MemberLine
+        Public Profit As MemberLine
+        Public Loss As MemberLine
+        Public Budget As MemberLine
+        Public Function IsShopAccount(memberId As String) As Boolean
+            Return {Cash, Stock, Profit}.Any(Function(m) SameName(m.Id, memberId))
+        End Function
+    End Class
+
+    Private Shared Function RowHasItems(m As MemberLine) As Boolean
+        Return m IsNot Nothing AndAlso m.Qty.Any(Function(q) q <> 0D)
+    End Function
+
+    ''' <summary>The shown shop's _Cash, _Stock and _Profit when this is a shop order, else Nothing.</summary>
+    Private Function ShopOrderOf(st As OrderState) As ShopOrderAccounts
+        Dim shopId As String = ShownShopId(st)
+        If shopId = "" Then Return Nothing
+        Dim acc As New ShopOrderAccounts With {.ShopId = shopId}
+        For Each m As MemberLine In st.Members.Where(Function(x) Not x.IsShopLine AndAlso SameName(x.OwnerId, shopId))
+            If m.Name.EndsWith("_Cash", StringComparison.OrdinalIgnoreCase) Then acc.Cash = m
+            If m.Name.EndsWith("_Stock", StringComparison.OrdinalIgnoreCase) Then acc.Stock = m
+            If m.Name.EndsWith("_Profit", StringComparison.OrdinalIgnoreCase) Then acc.Profit = m
+            If m.Name.EndsWith("_Loss", StringComparison.OrdinalIgnoreCase) Then acc.Loss = m
+            If m.Name.EndsWith("_Budget", StringComparison.OrdinalIgnoreCase) Then acc.Budget = m
+        Next
+        If acc.Cash Is Nothing OrElse acc.Stock Is Nothing OrElse acc.Profit Is Nothing OrElse acc.Loss Is Nothing OrElse acc.Budget Is Nothing Then Return Nothing
+        If Not st.Members.Any(Function(m) Not m.IsShopLine AndAlso RowHasItems(m)) Then Return Nothing
+        Return acc
+    End Function
+
+    ''' <summary>Is this order line one of the shop's accounts (any of its five)?</summary>
+    Private Function IsLineOfShop(shop As ShopOrderAccounts, memberId As String) As Boolean
+        Return SameName(OwnerOf(memberId), shop.ShopId)
+    End Function
+
+    ''' <summary>
+    ''' A shop order's step name: the step goes after the source, before the time at the end of the title:
+    ''' "20261112 Market 0142" + "_01Buying" -> "20261112 Market_01Buying 0142". No time at the end: added at the end.
+    ''' </summary>
+    Private Shared Function ShopStepTitle(title As String, stepName As String) As String
+        title = If(title, "").Trim()
+        Dim cut As Integer = title.LastIndexOf(" "c)
+        If cut > 0 Then
+            Dim tail As String = title.Substring(cut + 1)
+            If tail <> "" AndAlso tail.All(Function(ch) Char.IsDigit(ch)) Then Return title.Substring(0, cut) & stepName & " " & tail
+        End If
+        Return title & stepName
+    End Function
+
+    Private Function FirstFundId(memberId As String) As Integer
+        Dim f As Account = FundsOf(memberId).FirstOrDefault()
+        If f Is Nothing Then Throw New LedgerException(LedgerName(memberId) & " has no fund.")
+        Return f.Id
+    End Function
+
+    ''' <summary>Everything a shop order posts: one journal and one order per grid.</summary>
+    Private Class ShopPosting
+        Public Grid1 As Journal            ' buying: _Cash pays, _Stock takes every item
+        Public Grid2 As Journal            ' selling: the members' order + Profit + Stock out
+        Public Grid3 As Journal            ' loss: the items not sold - _Loss withdraws, _Stock credited
+        Public Grid4 As Journal            ' zeroing: Profit and Loss to zero, the net to Budget
+        Public ProfitToZero As Decimal     ' _Profit's balance after grid 3
+        Public LossToZero As Decimal       ' _Loss's balance after grid 3 (normally negative)
+        Public BuyDoc As OrderDocument     ' the orders Process saves: <title>_Buying, _Selling, _Loss, _Zeroing
+        Public SellDoc As OrderDocument
+        Public LossDoc As OrderDocument
+        Public ZeroDoc As OrderDocument
+        Public MemberDoc As OrderDocument  ' the members' lines (grid 2)
+        Public PurchaseTotal As Decimal
+        Public ProfitTotal As Decimal
+        Public StockOut As Decimal
+        Public Bought As New List(Of String)       ' "20 Banana"
+        Public ProfitLines As New List(Of String)  ' "18 Banana to Fatima: 18 x 0.025 = 0.450"
+        Public KeptLines As New List(Of String)    ' the items on _Stock's own row
+    End Class
+
+    Private Function BuildShopPosting(st As OrderState, shop As ShopOrderAccounts) As ShopPosting
+        Dim r As New ShopPosting
+        Dim typed As OrderDocument = BuildOrderDocument(st)
+        Dim shopKeys As New HashSet(Of String)(typed.Lines.Where(Function(l) IsLineOfShop(shop, l.MemberId)).Select(Function(l) l.LineKey),
+                                               StringComparer.OrdinalIgnoreCase)
+        Dim stockKey As String = shop.Stock.LineKey
+
+        ' ---- Grid 1: every item bought (no Profits), paid by _Cash ----
+        Dim purchase As New OrderDocument With {.OrderDate = typed.OrderDate, .OrderNo = typed.OrderNo, .Source = typed.Source,
+                                               .Delivery = typed.Delivery, .Vat = typed.Vat}
+        For Each it As OrderItem In typed.Items.Where(Function(x) Not x.IsProfits)
+            Dim q As Decimal = it.Quantities.Values.Sum()
+            If q = 0D Then Continue For
+            Dim pit As New OrderItem With {.Name = it.Name, .UnitPrice = it.UnitPrice}
+            pit.Quantities(stockKey) = q
+            purchase.Items.Add(pit)
+            r.Bought.Add(Qty(q) & " " & it.Name)
+        Next
+        Dim stockRow As PreviewLine = st.Preview.FirstOrDefault(Function(x) Not x.AutoRow AndAlso SameName(x.LineKey, stockKey))
+        Dim cashFund As Integer = If(stockRow Is Nothing OrElse stockRow.PaidFrom = "", 0, FundIdByName(shop.Cash.Id, stockRow.PaidFrom))
+        If cashFund = 0 Then cashFund = FirstFundId(shop.Cash.Id)
+        purchase.Lines.Add(New OrderLine With {.LineKey = stockKey, .MemberId = shop.Stock.Id, .LineType = OrderLineType.Normal})
+        r.PurchaseTotal = Math.Round(OrderPosting.ExternalTotal(OrderPosting.Charges(purchase)), 3)
+        If r.PurchaseTotal <= 0D Then Throw New LedgerException("The order total is zero: nothing to pay.")
+
+        ' ---- Grid 2: the members as usual (no Delivery / VAT: paid in grid 1) ----
+        r.MemberDoc = New OrderDocument With {.OrderDate = typed.OrderDate, .OrderNo = typed.OrderNo, .Source = typed.Source}
+        For Each it As OrderItem In typed.Items
+            Dim mit As New OrderItem With {.Name = it.Name, .UnitPrice = it.UnitPrice, .UnitProfit = it.UnitProfit, .IsProfits = it.IsProfits}
+            For Each kv As KeyValuePair(Of String, Decimal) In it.Quantities
+                If Not shopKeys.Contains(kv.Key) Then mit.Quantities(kv.Key) = kv.Value
+            Next
+            r.MemberDoc.Items.Add(mit)
+        Next
+        For Each l As OrderLine In typed.Lines.Where(Function(x) Not shopKeys.Contains(x.LineKey))
+            r.MemberDoc.Lines.Add(l)
+        Next
+        Dim j2 As Journal
+        If r.MemberDoc.Lines.Count > 0 Then
+            j2 = Ledger.BuildOrder(r.MemberDoc)
+        Else
+            j2 = New Journal With {.JournalType = JournalTypes.Order, .Memo = "Order " & typed.Source, .JournalDate = typed.OrderDate}
+        End If
+
+        ' Profit sold to the members (the Profits column), and its wording per item
+        r.ProfitTotal = Math.Round(r.MemberDoc.Items.Where(Function(x) x.IsProfits).Sum(Function(x) x.Quantities.Values.Sum() * x.UnitPrice), 3)
+        For Each m As MemberLine In st.Members.Where(Function(x) Not x.IsShopLine AndAlso Not IsLineOfShop(shop, x.Id) AndAlso RowHasItems(x))
+            For c As Integer = 0 To Math.Min(m.Qty.Count, st.Items.Count) - 1
+                Dim it As ItemCol = st.Items(c)
+                If it.IsProfits OrElse m.Qty(c) = 0D OrElse it.Profit = 0D Then Continue For
+                r.ProfitLines.Add(Qty(m.Qty(c)) & " " & it.Title & " to " & If(m.OwnerName <> "", m.OwnerName, m.Name) & ": " &
+                                  Qty(m.Qty(c)) & " x " & Money(it.Profit) & " = " & Money(Math.Round(m.Qty(c) * it.Profit, 3)))
+            Next
+        Next
+
+        ' What goes out of stock: the items on _Stock's own row (not taken by the members)
+        For Each it As OrderItem In typed.Items.Where(Function(x) Not x.IsProfits)
+            Dim q As Decimal = 0D
+            If Not it.Quantities.TryGetValue(stockKey, q) OrElse q = 0D Then Continue For
+            r.StockOut += q * it.UnitPrice
+            r.KeptLines.Add(Qty(q) & " " & it.Name & " (" & Qty(q) & " x " & Money(it.UnitPrice) & ")")
+        Next
+        r.StockOut = Math.Round(r.StockOut, 3)
+
+        Dim memo As String = "Order " & typed.Source
+        Dim accounts As New List(Of Account)(Ledger.Store.GetAccounts())
+        accounts.AddRange(j2.Entries.Where(Function(e) e.PendingAccount IsNot Nothing).Select(Function(e) e.PendingAccount).Distinct())
+        Dim b2 As New JournalBuilder(accounts, j2)
+        b2.Add(shop.Profit.Id, FirstFundId(shop.Profit.Id), r.ProfitTotal, "Profit from selling: " & memo)
+        b2.AddTo(shop.Profit.Id, AccountKind.Income, "Profit", "", -r.ProfitTotal, "Profit from selling: " & memo)
+        b2.AddTo(shop.Stock.Id, AccountKind.Stock, "Goods", "", -r.StockOut, "Out of stock: " & memo)
+        b2.AddTo(shop.Stock.Id, AccountKind.Expense, AccountNames.Expense, "", r.StockOut, "Out of stock: " & memo)
+
+        ' Grid 1's entries: _Cash +total (its fund), _Stock -total (the goods), each against Equity "Purchases"
+        Dim addGrid1 As Action(Of JournalBuilder) =
+            Sub(b)
+                b.Add(shop.Cash.Id, cashFund, r.PurchaseTotal, memo)
+                b.AddTo(shop.Cash.Id, AccountKind.Equity, "Purchases", "", -r.PurchaseTotal, memo)
+                b.AddTo(shop.Stock.Id, AccountKind.Stock, "Goods", "", -r.PurchaseTotal, memo)
+                b.AddTo(shop.Stock.Id, AccountKind.Equity, "Purchases", "", r.PurchaseTotal, memo)
+            End Sub
+        ' Grid 3's entries: the items not sold (_Stock's own row) - _Loss withdraws them, _Stock is credited them
+        Dim lossFund As Integer = FirstFundId(shop.Loss.Id)
+        Dim addGrid3 As Action(Of JournalBuilder) =
+            Sub(b)
+                b.AddTo(shop.Loss.Id, AccountKind.Expense, "Loss", "", r.StockOut, "Not sold: " & memo)
+                b.Add(shop.Loss.Id, lossFund, -r.StockOut, "Not sold: " & memo)
+                b.AddTo(shop.Stock.Id, AccountKind.Stock, "Goods", "", r.StockOut, "Not sold, to " & shop.Loss.Name & ": " & memo)
+                b.AddTo(shop.Stock.Id, AccountKind.Expense, AccountNames.Expense, "", -r.StockOut, "Not sold, to " & shop.Loss.Name & ": " & memo)
+            End Sub
+        ' Grid 4 (Zeroing): from the balances after grid 3. Each change goes to the account's fund, against Equity "Zeroing"
+        Dim sums As Dictionary(Of String, MemberFigures) = SummariesById()
+        r.ProfitToZero = Math.Round(Bal(FiguresOf(sums, shop.Profit.Id)) + r.ProfitTotal, 3)
+        r.LossToZero = Math.Round(Bal(FiguresOf(sums, shop.Loss.Id)) - r.StockOut, 3)
+        Dim addGrid4 As Action(Of JournalBuilder) =
+            Sub(b)
+                Dim moves As New List(Of Tuple(Of String, Decimal, String)) From {
+                    Tuple.Create(shop.Profit.Id, -r.ProfitToZero, "Zeroing: profit to " & shop.Budget.Name),
+                    Tuple.Create(shop.Loss.Id, -r.LossToZero, "Zeroing: loss to " & shop.Budget.Name),
+                    Tuple.Create(shop.Budget.Id, r.ProfitToZero + r.LossToZero, "Zeroing: profit less loss")}
+                For Each mv As Tuple(Of String, Decimal, String) In moves
+                    b.Add(mv.Item1, FirstFundId(mv.Item1), mv.Item2, mv.Item3)
+                    b.AddTo(mv.Item1, AccountKind.Equity, "Zeroing", "", -mv.Item2, mv.Item3)
+                Next
+            End Sub
+        ' Four journals (one per grid). The accounts made on the spot are shared, so posting them one after the
+        ' other never makes the same account twice.
+        Dim sharedAccounts As New List(Of Account)(accounts)
+        Dim addPending As Action(Of Journal) =
+            Sub(jj)
+                For Each a As Account In jj.Entries.Where(Function(e) e.PendingAccount IsNot Nothing).Select(Function(e) e.PendingAccount).Distinct()
+                    If Not sharedAccounts.Contains(a) Then sharedAccounts.Add(a)
+                Next
+            End Sub
+        addPending(j2)
+        r.Grid1 = New Journal With {.JournalType = JournalTypes.Order, .Memo = memo, .JournalDate = typed.OrderDate}
+        addGrid1(New JournalBuilder(sharedAccounts, r.Grid1)) : addPending(r.Grid1)
+        r.Grid3 = New Journal With {.JournalType = JournalTypes.Order, .Memo = memo, .JournalDate = typed.OrderDate}
+        addGrid3(New JournalBuilder(sharedAccounts, r.Grid3)) : addPending(r.Grid3)
+        r.Grid4 = New Journal With {.JournalType = JournalTypes.Order, .Memo = memo, .JournalDate = typed.OrderDate}
+        addGrid4(New JournalBuilder(sharedAccounts, r.Grid4)) : addPending(r.Grid4)
+        r.Grid2 = j2
+
+        ' The orders Process saves, one per grid
+        ' _Buying: every item on _Stock's line, paid by _Cash, with Delivery and VAT
+        r.BuyDoc = New OrderDocument With {.OrderDate = typed.OrderDate, .OrderNo = typed.OrderNo, .Source = typed.Source,
+                                          .Delivery = typed.Delivery, .Vat = typed.Vat}
+        For Each it As OrderItem In purchase.Items
+            r.BuyDoc.Items.Add(it)
+        Next
+        r.BuyDoc.Lines.Add(New OrderLine With {.LineKey = stockKey, .MemberId = shop.Stock.Id, .LineType = OrderLineType.Normal,
+                                               .PaidFromFundId = cashFund, .PayerMemberId = shop.Cash.Id, .PayerFundId = cashFund})
+        r.BuyDoc.DerivedPayments.Add(New OrderPayment With {.PayerMemberId = shop.Cash.Id, .FundAccountId = cashFund, .Amount = r.PurchaseTotal})
+        ' _Selling: the members' lines as usual
+        r.SellDoc = r.MemberDoc
+        ' _Loss: the items not sold, on _Loss's line (given by _Stock)
+        r.LossDoc = New OrderDocument With {.OrderDate = typed.OrderDate, .OrderNo = typed.OrderNo, .Source = typed.Source}
+        For Each it As OrderItem In typed.Items.Where(Function(x) Not x.IsProfits)
+            Dim q As Decimal = 0D
+            If Not it.Quantities.TryGetValue(stockKey, q) OrElse q = 0D Then Continue For
+            Dim lit As New OrderItem With {.Name = it.Name, .UnitPrice = it.UnitPrice}
+            lit.Quantities(shop.Loss.LineKey) = q
+            r.LossDoc.Items.Add(lit)
+        Next
+        If r.LossDoc.Items.Count > 0 Then
+            r.LossDoc.Lines.Add(New OrderLine With {.LineKey = shop.Loss.LineKey, .MemberId = shop.Loss.Id, .LineType = OrderLineType.Normal,
+                                                    .PayerMemberId = shop.Stock.Id})
+        End If
+        ' _Zeroing: no items (the journal moves Profit and Loss to Budget)
+        r.ZeroDoc = New OrderDocument With {.OrderDate = typed.OrderDate, .OrderNo = typed.OrderNo, .Source = typed.Source}
+        Return r
+    End Function
+
+    ''' <summary>The shop order's Preview: grid 1 (Section 0) and grid 2 (Section 1), each row's figures from the ledger.</summary>
+    Private Sub RecalculateShopPreview(st As OrderState, shop As ShopOrderAccounts)
+        ' Rows: grid 1 = _Stock (its own row, paid by _Cash) + _Cash; grid 2 = _Profit, _Stock, the members, other payers
+        Dim stockRow As PreviewLine = st.Preview.FirstOrDefault(Function(x) Not x.AutoRow AndAlso SameName(x.LineKey, shop.Stock.LineKey))
+        If stockRow Is Nothing Then stockRow = New PreviewLine With {.MemberId = shop.Stock.Id, .LineKey = shop.Stock.LineKey, .Name = shop.Stock.Name}
+        stockRow.Section = 0 : stockRow.TxType = TxNormal : stockRow.TypeLocked = True : stockRow.AccountLocked = True
+        stockRow.Account = shop.Cash.Name
+        RefreshPaidFrom(stockRow)   ' _Cash's funds
+        Dim members As List(Of PreviewLine) = st.Preview.Where(Function(x) Not x.AutoRow AndAlso Not IsLineOfShop(shop, x.MemberId)).ToList()
+        For Each p As PreviewLine In members
+            p.Section = 1
+        Next
+
+        Dim r As ShopPosting = Nothing
+        Dim problem As String = Nothing
+        Dim ch1 As New Dictionary(Of String, MemberFigures)(StringComparer.OrdinalIgnoreCase)
+        Dim ch2 As New Dictionary(Of String, MemberFigures)(StringComparer.OrdinalIgnoreCase)
+        Dim ch3 As New Dictionary(Of String, MemberFigures)(StringComparer.OrdinalIgnoreCase)
+        Dim ch4 As New Dictionary(Of String, MemberFigures)(StringComparer.OrdinalIgnoreCase)
+        Dim charges As New List(Of LineCharge)
+        Try
+            r = BuildShopPosting(st, shop)
+            For Each kv As KeyValuePair(Of String, MemberFigures) In Ledger.Preview(r.Grid1).Changes : ch1(kv.Key) = kv.Value : Next
+            If r.Grid2.Entries.Count > 0 Then
+                For Each kv As KeyValuePair(Of String, MemberFigures) In Ledger.Preview(r.Grid2).Changes : ch2(kv.Key) = kv.Value : Next
+            End If
+            If r.StockOut <> 0D Then
+                For Each kv As KeyValuePair(Of String, MemberFigures) In Ledger.Preview(r.Grid3).Changes : ch3(kv.Key) = kv.Value : Next
+            End If
+            If r.Grid4.Entries.Count > 0 Then
+                For Each kv As KeyValuePair(Of String, MemberFigures) In Ledger.Preview(r.Grid4).Changes : ch4(kv.Key) = kv.Value : Next
+            End If
+            charges = OrderPosting.Charges(r.MemberDoc)
+        Catch ex As LedgerException
+            problem = ex.Message
+        Catch ex As Exception
+            problem = "The Preview could not be calculated: " & ex.Message
+        End Try
+
+        st.Preview.Clear()
+        st.Preview.Add(stockRow)
+        st.Preview.Add(New PreviewLine With {.MemberId = shop.Cash.Id, .Name = shop.Cash.Name, .AutoRow = True, .Section = 0})
+        st.Preview.Add(New PreviewLine With {.MemberId = shop.Profit.Id, .Name = shop.Profit.Name, .AutoRow = True, .Section = 1})
+        st.Preview.Add(New PreviewLine With {.MemberId = shop.Stock.Id, .Name = shop.Stock.Name, .AutoRow = True, .Section = 1})
+        st.Preview.AddRange(members)
+        For Each id As String In ch2.Keys
+            If IsLineOfShop(shop, id) OrElse st.Preview.Any(Function(x) x.Section = 1 AndAlso SameName(x.MemberId, id)) Then Continue For
+            st.Preview.Add(New PreviewLine With {.MemberId = id, .Name = LedgerName(id), .AutoRow = True, .Section = 1})
+        Next
+        If r IsNot Nothing AndAlso r.StockOut <> 0D Then
+            st.Preview.Add(New PreviewLine With {.MemberId = shop.Loss.Id, .Name = shop.Loss.Name, .AutoRow = True, .Section = 2})
+            st.Preview.Add(New PreviewLine With {.MemberId = shop.Stock.Id, .Name = shop.Stock.Name, .AutoRow = True, .Section = 2})
+        End If
+        If r IsNot Nothing AndAlso (r.ProfitToZero <> 0D OrElse r.LossToZero <> 0D) Then
+            st.Preview.Add(New PreviewLine With {.MemberId = shop.Budget.Id, .Name = shop.Budget.Name, .AutoRow = True, .Section = 3})
+            st.Preview.Add(New PreviewLine With {.MemberId = shop.Profit.Id, .Name = shop.Profit.Name, .AutoRow = True, .Section = 3})
+            st.Preview.Add(New PreviewLine With {.MemberId = shop.Loss.Id, .Name = shop.Loss.Name, .AutoRow = True, .Section = 3})
+        End If
+
+        ' Figures: grid 1 from the balances now, grid 2 from grid 1's new balances
+        Dim before As Dictionary(Of String, MemberFigures) = SummariesById()
+        For Each p As PreviewLine In st.Preview
+            p.ExBalance = Nothing : p.ExCash = Nothing : p.ExExpense = Nothing : p.ExReceivable = Nothing : p.ExPayable = Nothing
+            p.NextBalance = Nothing : p.Cash = Nothing : p.Expense = Nothing : p.Receivable = Nothing : p.Payable = Nothing
+            If Not (p.AutoRow OrElse SameName(p.LineKey, p.MemberId)) Then Continue For
+            Dim b As MemberFigures = FiguresOf(before, p.MemberId)
+            If p.Section >= 1 Then b = Plus(b, FiguresOf(ch1, p.MemberId))
+            If p.Section >= 2 Then b = Plus(b, FiguresOf(ch2, p.MemberId))
+            If p.Section >= 3 Then b = Plus(b, FiguresOf(ch3, p.MemberId))
+            Dim a As MemberFigures = Plus(b, FiguresOf({ch1, ch2, ch3, ch4}(p.Section), p.MemberId))
+            p.ExBalance = Bal(b) : p.ExCash = CashOf(b) : p.ExExpense = b.Expense : p.ExReceivable = b.OwedToThem : p.ExPayable = b.TheyOwe
+            p.NextBalance = Bal(a) : p.Cash = CashOf(a) : p.Expense = a.Expense : p.Receivable = a.OwedToThem : p.Payable = a.TheyOwe
+        Next
+
+        ' Texts and totals
+        For Each p As PreviewLine In st.Preview
+            If r Is Nothing Then Exit For
+            If p.Section = 0 AndAlso SameName(p.MemberId, shop.Stock.Id) Then
+                p.Lines = String.Join(vbLf, r.Bought) : p.Total = r.PurchaseTotal : p.Credit = 0D : p.Debt = 0D
+            ElseIf p.Section = 0 AndAlso SameName(p.MemberId, shop.Cash.Id) Then
+                Dim t As New List(Of String) From {"Pay " & Money(r.PurchaseTotal) & " for:", "Credit (" & Money(r.PurchaseTotal) & ")"}
+                t.AddRange(r.Bought)
+                If st.Delivery <> 0D Then t.Add("Delivery " & Money(st.Delivery))
+                If st.VAT <> 0D Then t.Add("VAT " & Money(st.VAT))
+                p.Lines = String.Join(vbLf, t) : p.Total = r.PurchaseTotal
+            ElseIf p.Section = 1 AndAlso SameName(p.MemberId, shop.Profit.Id) Then
+                Dim t As New List(Of String) From {"Profit from selling:"}
+                t.AddRange(r.ProfitLines)
+                p.Lines = String.Join(vbLf, t) : p.Credit = r.ProfitTotal : p.Total = r.ProfitTotal
+            ElseIf p.Section = 1 AndAlso SameName(p.MemberId, shop.Stock.Id) Then
+                Dim t As New List(Of String)
+                If r.KeptLines.Count > 0 Then t.Add("Out of stock (not taken by members):") : t.AddRange(r.KeptLines) Else t.Add("Nothing kept on its own row")
+                p.Lines = String.Join(vbLf, t) : p.Debt = r.StockOut : p.Total = r.StockOut
+            ElseIf p.Section = 3 Then
+                ' Zeroing
+                Dim net As Decimal = r.ProfitToZero + r.LossToZero
+                Dim change As Decimal
+                Dim t As New List(Of String)
+                If SameName(p.MemberId, shop.Budget.Id) Then
+                    change = net
+                    t.Add("Profit less loss:")
+                    t.Add("Profit " & Money(r.ProfitToZero) & " from " & shop.Profit.Name)
+                    t.Add("Loss " & Money(r.LossToZero) & " from " & shop.Loss.Name)
+                    t.Add("Net " & Money(net) & If(net >= 0D, " added to ", " taken from ") & "the budget")
+                ElseIf SameName(p.MemberId, shop.Profit.Id) Then
+                    change = -r.ProfitToZero
+                    t.Add("Profit " & Money(r.ProfitToZero) & " moved to " & shop.Budget.Name)
+                    t.Add("(" & shop.Profit.Name & " back to zero)")
+                Else
+                    change = -r.LossToZero
+                    t.Add("Loss " & Money(r.LossToZero) & " covered by " & shop.Budget.Name)
+                    t.Add("(" & shop.Loss.Name & " back to zero)")
+                End If
+                p.Lines = String.Join(vbLf, t) : p.Total = Math.Abs(change)
+                If change >= 0D Then p.Credit = change Else p.Debt = -change
+            ElseIf p.Section = 2 Then
+                ' the items not sold: _Loss withdraws them, _Stock is credited them
+                Dim t As New List(Of String) From {"Not sold (moved to " & shop.Loss.Name & "):"}
+                t.AddRange(r.KeptLines.Select(Function(x) x.Replace(")", " BD)")))
+                p.Lines = String.Join(vbLf, t) : p.Total = r.StockOut
+                If SameName(p.MemberId, shop.Loss.Id) Then p.Debt = r.StockOut Else p.Credit = r.StockOut
+            ElseIf Not p.AutoRow Then
+                Dim rowKey As String = p.LineKey
+                p.Total = charges.Where(Function(c) IsKeyOfRow(c.Line.LineKey, rowKey)).Sum(Function(c) c.Total)
+            Else
+                ' another payer of a member's line
+                Dim paid As New List(Of String)
+                For Each c As LineCharge In charges
+                    If c.Line.PaidFromFundId = 0 Then Continue For
+                    Dim fund As Account = LedgerAccounts().FirstOrDefault(Function(x) x.Id = c.Line.PaidFromFundId)
+                    If fund Is Nothing OrElse Not SameName(fund.MemberId, p.MemberId) Then Continue For
+                    paid.Add("Pays " & Money(c.Total) & " for " & LedgerName(c.Line.MemberId) & " (from " & fund.Name & ")")
+                Next
+                p.Lines = String.Join(vbLf, paid)
+            End If
+        Next
+        ' the two shop rows of grid 2 only when they change something
+        st.Preview.RemoveAll(Function(x) x.Section = 1 AndAlso x.AutoRow AndAlso r IsNot Nothing AndAlso
+                                         ((SameName(x.MemberId, shop.Profit.Id) AndAlso r.ProfitTotal = 0D) OrElse
+                                          (SameName(x.MemberId, shop.Stock.Id) AndAlso r.StockOut = 0D)))
+
+        ' Split payments of the members must add up
+        If problem Is Nothing Then
+            For Each p As PreviewLine In members
+                Dim m As MemberLine = st.Members.FirstOrDefault(Function(x) SameName(x.LineKey, p.LineKey))
+                If m Is Nothing OrElse m.Splits.Count = 0 OrElse p.TxType <> TxNormal Then Continue For
+                If Math.Abs(m.Splits.Sum(Function(x) x.Amount) - If(p.Total, 0D)) > 0.0015D Then
+                    problem = "the split payment of " & p.Name & " adds up to " & Money(m.Splits.Sum(Function(x) x.Amount)) &
+                              " but the line is " & Money(If(p.Total, 0D)) & ": click + on that row to fix it"
+                    Exit For
+                End If
+            Next
+        End If
+
+        If problem IsNot Nothing Then
+            st.StatusKind = "bad"
+            st.StatusText = ChrW(&H2716) & "  Cannot process " & ChrW(&H2013) & " " & problem
+        Else
+            st.StatusKind = "ok"
+            st.StatusText = ChrW(&H2714) & "  Ready to process " & ChrW(&H2013) & " " & shop.Cash.Name & " pays the vendor " & Money(r.PurchaseTotal)
+        End If
+        st.PreviewCurrent = True
+    End Sub
+
     ' ---------- Calculate ----------
 
     Protected Sub btnCalculate_Click(sender As Object, e As EventArgs) Handles btnCalculate.Click
@@ -2615,6 +3044,11 @@ Partial Class ExpensesAndDebtsWShop
         Dim st As OrderState = State
         Dim preview As PostingPreview = Nothing
         Dim problem As String = Nothing
+        Dim shop As ShopOrderAccounts = ShopOrderOf(st)
+        If shop IsNot Nothing Then
+            RecalculateShopPreview(st, shop)   ' a shop order: two grids
+            Return
+        End If
         Try
             Dim doc As OrderDocument = BuildOrderDocument(st)
             If doc.Lines.Count > 0 Then preview = Ledger.PreviewOrder(doc)
@@ -2787,8 +3221,16 @@ Partial Class ExpensesAndDebtsWShop
             ShowMsg("There is nothing to save.", True)
             Return
         End If
+        Dim shop As ShopOrderAccounts = ShopOrderOf(st)
         Try
-            Ledger.PreviewOrder(doc)
+            If shop IsNot Nothing Then
+                Dim r As ShopPosting = BuildShopPosting(st, shop)
+                For Each jj As Journal In {r.Grid1, r.Grid2, r.Grid3, r.Grid4}
+                    If jj.Entries.Count > 0 Then Ledger.Preview(jj)
+                Next
+            Else
+                Ledger.PreviewOrder(doc)
+            End If
         Catch ex As LedgerException
             ShowMsg("Nothing can be saved: " & ex.Message, True)
             Return
@@ -2799,7 +3241,7 @@ Partial Class ExpensesAndDebtsWShop
         ' Members charged a profit should normally be buying from the shop
         Dim warnings As New List(Of String)
         Dim profitNoSale As List(Of String) = st.Preview.
-            Where(Function(p) Not p.AutoRow AndAlso p.TxType <> TxShopSale AndAlso ProfitOfLine(st, p.LineKey) <> 0D).
+            Where(Function(p) shop Is Nothing AndAlso Not p.AutoRow AndAlso p.TxType <> TxShopSale AndAlso ProfitOfLine(st, p.LineKey) <> 0D).
             Select(Function(p) p.Name).ToList()
         If profitNoSale.Count > 0 Then
             warnings.Add("Charged Profits but not """ & TxShopSale & """: " & String.Join(", ", profitNoSale) & vbLf &
@@ -2811,6 +3253,12 @@ Partial Class ExpensesAndDebtsWShop
         Dim suggested As String = ParseOrderDate(st.OrderDate).ToString("yyyyMMdd", CultureInfo.InvariantCulture) & " " &
                                   st.Source & " " & OrderTimeSuffix(st.OrderNo)
         txtOrderTitle.Text = String.Join(" ", suggested.Split(New Char() {" "c}, StringSplitOptions.RemoveEmptyEntries))
+        If shop IsNot Nothing Then
+            lblProcessInfo.Text = Server.HtmlEncode("A shop order: four entries are saved, named after the title, e.g. " &
+                                                    ShopStepTitle(txtOrderTitle.Text, "_01Buying") & ", " & ShopStepTitle(txtOrderTitle.Text, "_02Selling") & ", " &
+                                                    ShopStepTitle(txtOrderTitle.Text, "_03Loss") & ", " & ShopStepTitle(txtOrderTitle.Text, "_04Zeroing") &
+                                                    " (an empty one is skipped).")
+        End If
 
         pnlProcess.Visible = True
         txtOrderTitle.Focus()
@@ -2845,8 +3293,33 @@ Partial Class ExpensesAndDebtsWShop
         If doc.Lines.Count = 0 Then Return
         Dim savedId As String = ""
         Try
-            Ledger.PostOrder(doc)
-            savedId = doc.OrderId
+            Dim shop As ShopOrderAccounts = ShopOrderOf(st)
+            If shop IsNot Nothing Then
+                ' A shop order: the four grids, one after the other, each as its own order
+                Dim r As ShopPosting = BuildShopPosting(st, shop)
+                Dim steps As New List(Of Tuple(Of Journal, OrderDocument, String)) From {
+                    Tuple.Create(r.Grid1, r.BuyDoc, "_01Buying"), Tuple.Create(r.Grid2, r.SellDoc, "_02Selling"),
+                    Tuple.Create(r.Grid3, r.LossDoc, "_03Loss"), Tuple.Create(r.Grid4, r.ZeroDoc, "_04Zeroing")}
+                Dim saved As New List(Of String)
+                For Each stp As Tuple(Of Journal, OrderDocument, String) In steps
+                    If stp.Item1.Entries.Count = 0 Then Continue For
+                    Try
+                        stp.Item2.Title = ShopStepTitle(orderTitle, stp.Item3)
+                        stp.Item1.Memo = stp.Item2.Title
+                        Ledger.Post(stp.Item1, stp.Item2)
+                        saved.Add(stp.Item2.OrderId & " """ & stp.Item2.Title & """")
+                    Catch ex As Exception
+                        ResetLedgerCache()
+                        ShowMsg("Saved: " & If(saved.Count = 0, "nothing", String.Join(", ", saved)) & ". Not saved: """ & ShopStepTitle(orderTitle, stp.Item3) &
+                                """ and after it - " & ex.Message, True)
+                        Return
+                    End Try
+                Next
+                savedId = String.Join(", ", saved)
+            Else
+                Ledger.PostOrder(doc)
+                savedId = doc.OrderId
+            End If
         Catch ex As Exception
             ResetLedgerCache()
             ShowMsg("Nothing was saved: " & ex.Message, True)
@@ -2862,7 +3335,11 @@ Partial Class ExpensesAndDebtsWShop
             loanNote = " The loan accounts were not updated: " & ex.Message
         End Try
         ResetOrder()
-        ShowMsg("Order " & savedId & " """ & orderTitle & """ saved." & loanNote, loanNote <> "")
+        If savedId.Contains("""") Then
+            ShowMsg("Orders saved: " & savedId & "." & loanNote, loanNote <> "")   ' a shop order: four entries
+        Else
+            ShowMsg("Order " & savedId & " """ & orderTitle & """ saved." & loanNote, loanNote <> "")
+        End If
     End Sub
 
     ' ====================================================================
@@ -3836,6 +4313,14 @@ Partial Class ExpensesAndDebtsWShop
         Return BalModeOpening
     End Function
 
+    ''' <summary>For a shop's &lt;Shop&gt;_Budget account: the same shop's &lt;Shop&gt;_Cash account; otherwise Nothing.</summary>
+    Private Function ShopCashOfBudget(a As Member) As Member
+        If a Is Nothing OrElse Not a.Name.EndsWith("_Budget", StringComparison.OrdinalIgnoreCase) Then Return Nothing
+        Dim shopId As String = OwnerOf(a.Id)
+        If shopId = "" OrElse Not IsShopCustomer(shopId) Then Return Nothing
+        Return AccountsOfPerson(shopId).FirstOrDefault(Function(m) m.Name.EndsWith("_Cash", StringComparison.OrdinalIgnoreCase))
+    End Function
+
     Private Function OpeningBalanceOf(memberId As String) As Decimal
         Dim dt As DataTable = OrdersDB.GetDataTable("SELECT Member_Opening_Balance FROM Members WHERE Member_ID = " & OrdersDB.SqlText(memberId))
         Return If(dt.Rows.Count = 0, 0D, DbDecimal(dt.Rows(0)("Member_Opening_Balance")))
@@ -3863,6 +4348,8 @@ Partial Class ExpensesAndDebtsWShop
             Case Else
                 lblAccBalanceWhat.Text = "Opening Balance"
                 lblAccBalanceHint.Text = "positive = money in hand, negative = money owed"
+                Dim cashAcc As Member = ShopCashOfBudget(a)
+                If cashAcc IsNot Nothing Then lblAccBalanceHint.Text &= "; " & Server.HtmlEncode(ShortAccountName(cashAcc)) & " gets the opposite (the two add up to 0)"
                 txtAccBalance.Text = Money(OpeningBalanceOf(a.Id))
         End Select
         pnlAccNew.Visible = False
@@ -3896,10 +4383,14 @@ Partial Class ExpensesAndDebtsWShop
         Try
             Select Case mode
                 Case BalModeOpening
+                    ' A shop's _Budget: its _Cash gets the opposite opening balance (_Budget + _Cash = 0)
+                    Dim cashAcc As Member = ShopCashOfBudget(a)
                     Using cn As System.Data.OleDb.OleDbConnection = OpenOrdersDb()
                         SetOpeningBalance(cn, a.Id, amount)
+                        If cashAcc IsNot Nothing Then SetOpeningBalance(cn, cashAcc.Id, -amount)
                     End Using
                     done = "opening balance set to " & Money(amount)
+                    If cashAcc IsNot Nothing Then done &= "; " & ShortAccountName(cashAcc) & " set to " & Money(-amount)
 
                 Case BalModeSpent
                     Dim have As Member = HaveOf(a)

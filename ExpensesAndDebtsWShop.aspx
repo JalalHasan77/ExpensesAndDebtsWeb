@@ -1,4 +1,4 @@
-<%@ Page Language="VB" AutoEventWireup="false" CodeFile="ExpensesAndDebtsWShop.aspx.vb" Inherits="ExpensesAndDebtsWShop"   MaintainScrollPositionOnPostback="true" EnableEventValidation = false  %>
+﻿<%@ Page Language="VB" AutoEventWireup="false" CodeFile="ExpensesAndDebtsWShop.aspx.vb" Inherits="ExpensesAndDebtsWShop"   MaintainScrollPositionOnPostback="true" EnableEventValidation = false  %>
 
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head runat="server">
@@ -831,6 +831,8 @@ fieldset.tx-acc { border: 1px solid #cbd5e1; border-radius: 10px; background: #f
 fieldset.tx-acc > legend { padding: 0 8px; font-size: 16px; font-weight: 700; color: #1a1464; }
 fieldset.tx-acc > legend .type { font-size: 12px; font-weight: 400; color: #64748b; margin-left: 6px; }
 fieldset.tx-acc.loan > legend { color: #c2410c; }
+/* A shop order's second Preview grid (profit, stock, members) */
+.pv-sec { margin: 22px 0 6px; font-weight: 700; font-size: 15px; color: #1a1464; }
 .tx-acc .tx-cards { margin: 4px 0 10px; }
 .tx-acc .tx-grid { background: #fff; }
 .tx-scroll { overflow-x: auto; }
@@ -1441,6 +1443,7 @@ fieldset.tx-acc.loan > legend { color: #c2410c; }
                                                                                 </tr>
                                                                                 <asp:Repeater ID="rptPreview" runat="server">
                                                                                     <ItemTemplate>
+                                                                                        <asp:Literal ID="litSection" runat="server" />
                                                                                         <tr class='<%# If(CBool(Eval("AutoRow")), "auto", "") %>'>
                                                                                             <td class="mem"><%# Server.HtmlEncode(Convert.ToString(Eval("Name"))) %><asp:HiddenField ID="hfIdx" runat="server" /></td>
                                                                                             <td class="ex"><%# M(Eval("ExBalance")) %></td>
@@ -1465,6 +1468,7 @@ fieldset.tx-acc.loan > legend { color: #c2410c; }
                                                                                 </asp:Repeater>
                                                                             </table>
                                                                             <asp:Label ID="lblNoPreview" runat="server" CssClass="tab-note" Text="Click Calculate to build the Preview." />
+
                                                                         </div>
                                                                     </asp:View>
                                                                 </asp:MultiView>

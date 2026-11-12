@@ -1,4 +1,4 @@
-<%@ Page Language="VB" AutoEventWireup="false" CodeFile="ExpensesAndDebtsWShop - Copy.aspx.vb" Inherits="ExpensesAndDebtsWShop"   MaintainScrollPositionOnPostback="true" EnableEventValidation = false  %>
+﻿<%@ Page Language="VB" AutoEventWireup="false" CodeFile="ExpensesAndDebtsWShopOneGo - Copy.aspx.vb" Inherits="ExpensesAndDebtsWShopOneGo"   MaintainScrollPositionOnPostback="true" EnableEventValidation = false  %>
 
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head runat="server">
@@ -704,6 +704,21 @@ a.file-tile { text-decoration: none; cursor: pointer; }
 .pv-grid td.mem { text-align: left; }
 .pv-grid tr.auto td { color: #6b7280; }
 .pv-ddl { min-width: 140px; padding: 3px 4px; font: inherit; }
+/* Split payment: the round + next to Account, the payers list, and its dialog */
+.pv-grid td.pv-acc { white-space: nowrap; }
+.pv-split { display: inline-block; width: 20px; height: 20px; line-height: 18px; margin-left: 6px; border-radius: 50%; border: 1px solid #1a1464;
+            color: #1a1464; background: #fff; font-weight: 700; text-align: center; text-decoration: none; vertical-align: middle; }
+.pv-split:hover { background: #1a1464; color: #fff; }
+.pv-split.on { background: #1a1464; color: #fff; }
+.pv-parts { display: inline-block; text-align: left; font-size: 12px; line-height: 1.5; vertical-align: middle; }
+.pv-parts b { font-weight: 700; }
+.split-grid { border-collapse: collapse; width: 100%; margin: 6px 0 4px; }
+.split-grid th, .split-grid td { padding: 4px 6px; text-align: left; }
+.split-grid th { font-size: 13px; color: #475569; border-bottom: 1px solid #cbd5e1; }
+.split-grid .txt-input { width: 110px; text-align: right; }
+.split-sum { margin: 6px 0 10px; font-size: 14px; }
+.split-sum .bad { color: #b91c1c; font-weight: 700; }
+.split-sum .good { color: #15803d; font-weight: 700; }
 
 .status-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; margin: 10px 0; border-radius: 6px; font: 700 15px 'Segoe UI', Arial, sans-serif; }
 .status-ok { background: #dcf5dc; color: #065f46; }
@@ -762,6 +777,75 @@ a.file-tile { text-decoration: none; cursor: pointer; }
 .acc-note { margin: 2px 0 6px 130px; font-size: 13px; color: #64748b; }
 .acc-hint { font-size: 12px; color: #64748b; }
 .items-grid tr.loan td { color: #c2410c; }
+/* =====================================================================
+   MATRICES: who must repay whom, who lent to whom (per person)
+   ===================================================================== */
+.mx-wrap { display: flex; flex-direction: column; gap: 18px; max-width: 520px; }
+fieldset.mx-person { border: 1px solid #cbd5e1; border-radius: 10px; background: #f8fafc; padding: 4px 16px 12px; margin: 0; }
+fieldset.mx-person > legend { padding: 0 8px; font-size: 16px; font-weight: 700; color: #1a1464; }
+.mx-list { border-collapse: collapse; width: 100%; font: 14px Calibri, Arial, sans-serif; }
+.mx-list td { padding: 3px 6px; white-space: nowrap; }
+.mx-list td.r { text-align: right; }
+.mx-list tr.head td { font-weight: 700; padding-top: 10px; border-bottom: 1px solid #e2e8f0; }
+.mx-list tr.head.repay td { color: #b91c1c; }
+.mx-list tr.head.lend td { color: #15803d; }
+.mx-list tr.part td.who { padding-left: 26px; }
+.mx-list td .via { font-size: 12px; color: #94a3b8; margin-left: 6px; }
+
+/* =====================================================================
+   MAIN DASHBOARD: people and their accounts' balances
+   ===================================================================== */
+.db-grid { border-collapse: collapse; font: 14px Calibri, Arial, sans-serif; min-width: 560px; }
+.db-grid th { background: #111827; color: #fff; padding: 7px 12px; text-align: left; white-space: nowrap; }
+.db-grid th.r, .db-grid td.r { text-align: right; }
+.db-grid td { padding: 6px 12px; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+.db-grid tr.person td { font-weight: 700; background: #eef2f7; }
+.db-grid tr.acc td { color: #475569; }
+.db-grid tr.acc td.name { padding-left: 34px; }
+.db-grid tr.acc.loan td.name { color: #c2410c; }
+.db-grid td .type { font-size: 12px; color: #94a3b8; margin-left: 6px; font-weight: 400; }
+.db-grid td .note { font-size: 12px; color: #94a3b8; margin-left: 6px; font-weight: 400; }
+.db-grid td.neg { color: #dc2626; }
+.db-grid tr.total td { font-weight: 700; background: #111827; color: #fff; }
+.db-grid tr.total td.neg { color: #fca5a5; }
+
+/* =====================================================================
+   TRANSACTIONS: the person, then one grid per account
+   ===================================================================== */
+.tx-person { border: 1px solid #cbd5e1; border-radius: 10px; background: #f8fafc; padding: 12px 16px; margin: 4px 0 18px; }
+.tx-person h2 { margin: 0 0 4px; font-size: 20px; color: #111827; }
+.tx-person .info { color: #475569; font-size: 13px; margin-bottom: 10px; }
+.tx-person .info span { margin-right: 18px; white-space: nowrap; }
+.tx-person .info b { color: #1e293b; }
+.tx-cards { display: flex; flex-wrap: wrap; gap: 10px; }
+.tx-card { width: 160px; height: 60px; display: flex; overflow: hidden; }
+.tx-card .bar { width: 5px; }
+.tx-card .body { padding: 6px 10px; }
+.tx-card .cap { color: #64748b; font: 700 12px Calibri, Arial, sans-serif; }
+.tx-card .val { font: 700 22px Calibri, Arial, sans-serif; margin-top: 2px; }
+.tx-card .val.neg { color: #b22222 !important; }
+.tx-cards.small .tx-card { width: 130px; height: 46px; }
+.tx-cards.small .tx-card .cap { font-size: 11px; }
+.tx-cards.small .tx-card .val { font-size: 17px; margin-top: 0; }
+fieldset.tx-acc { border: 1px solid #cbd5e1; border-radius: 10px; background: #f8fafc; padding: 6px 16px 14px; margin: 0 0 22px; min-width: 0; }
+fieldset.tx-acc > legend { padding: 0 8px; font-size: 16px; font-weight: 700; color: #1a1464; }
+fieldset.tx-acc > legend .type { font-size: 12px; font-weight: 400; color: #64748b; margin-left: 6px; }
+fieldset.tx-acc.loan > legend { color: #c2410c; }
+/* A shop order's second Preview grid (profit, stock, members) */
+.pv-sec { margin: 22px 0 6px; font-weight: 700; font-size: 15px; color: #1a1464; }
+.tx-acc .tx-cards { margin: 4px 0 10px; }
+.tx-acc .tx-grid { background: #fff; }
+.tx-scroll { overflow-x: auto; }
+.tx-grid { border-collapse: collapse; font: 14px Calibri, Arial, sans-serif; }
+.tx-grid th { background: #111827; color: #fff; padding: 7px 9px; white-space: nowrap; text-align: left; }
+.tx-grid td { padding: 5px 9px; border-bottom: 1px solid #e2e8f0; vertical-align: top; white-space: nowrap; }
+.tx-grid td.r { text-align: right; }
+.tx-grid td.ex { background: #fffacd; }
+.tx-grid td.b { font-weight: 700; }
+.tx-grid td.neg { color: #dc2626; }
+.tx-grid td.items { line-height: 1.45; }
+.tx-wrap.hide-ex .exc { display: none; }
+
 .acc-grid td.acc-acts { white-space: nowrap; text-align: right; }
 .acc-grid .acc-act { color: #1a1464; font-weight: 700; font-size: 13px; text-decoration: none; margin-left: 12px; }
 .acc-grid .acc-act:hover { text-decoration: underline; }
@@ -786,6 +870,7 @@ a.file-tile { text-decoration: none; cursor: pointer; }
         /* ---------- Member groups: filter in the Order grid's corner, checkboxes in Add New Member ---------- */
         .order-grid td.grp-cell { text-align: left; vertical-align: middle; padding: 3px 6px; }
         .grp-filter { width: 100%; max-width: 260px; padding: 3px 6px; font-size: 13px; border: 1px solid #94a3b8; border-radius: 4px; background: #fff; }
+        .shop-filter { display: block; margin-top: 4px; border-color: #b45309; color: #92400e; }
         .grp-row { align-items: flex-start; }
         .grp-box { display: flex; flex-direction: column; gap: 8px; }
         .grp-checks label { margin: 0 14px 0 4px; }
@@ -907,6 +992,49 @@ a.file-tile { text-decoration: none; cursor: pointer; }
             }
             return false;
         }
+
+        // Add New Member: an Individual has all the fields; a Shop only its name
+        function edMemberKind() {
+            var ddl = document.getElementById('ddlNewMemberKind');
+            if (!ddl) { return; }
+            var shop = ddl.value === 'Shop';
+            var rows = document.querySelectorAll('.ind-only'), i;
+            for (i = 0; i < rows.length; i++) { rows[i].style.display = shop ? 'none' : ''; }
+            var notes = document.querySelectorAll('.shop-only');
+            for (i = 0; i < notes.length; i++) { notes[i].style.display = shop ? '' : 'none'; }
+            var lbl = document.getElementById('newMemberNameLbl');
+            if (lbl) { lbl.textContent = shop ? 'Shop name:' : 'Member:'; }
+        }
+        if (window.addEventListener) { window.addEventListener('load', edMemberKind); }
+
+        // Transactions: hide / show the ex columns (remembered in hfTxEx between postbacks)
+        function edApplyTxEx() {
+            var wrap = document.getElementById('txWrap'), hf = document.getElementById('hfTxEx'), btn = document.getElementById('btnTxEx');
+            if (!wrap) { return; }
+            var hidden = hf && hf.value === '1';
+            wrap.className = hidden ? 'tx-wrap hide-ex' : 'tx-wrap';
+            if (btn) { btn.textContent = hidden ? 'Show ex columns' : 'Hide ex columns'; }
+        }
+        function edToggleTxEx() {
+            var hf = document.getElementById('hfTxEx');
+            if (hf) { hf.value = hf.value === '1' ? '0' : '1'; }
+            edApplyTxEx();
+        }
+        if (window.addEventListener) { window.addEventListener('load', edApplyTxEx); }
+
+        // Split payment dialog: what was entered and what is left of the line's total
+        function edSplitSum() {
+            var dueEl = document.getElementById('splitDue');
+            if (!dueEl) { return; }
+            var due = edNum(dueEl.getAttribute('data-due'));
+            var boxes = document.querySelectorAll('input[data-split]'), given = 0;
+            for (var i = 0; i < boxes.length; i++) { given += edNum(boxes[i].value); }
+            var left = Math.round((due - given) * 1000) / 1000;
+            var g = document.getElementById('splitGiven'), l = document.getElementById('splitLeft');
+            if (g) { g.textContent = given.toFixed(3); }
+            if (l) { l.textContent = left.toFixed(3); l.className = left === 0 ? 'good' : 'bad'; }
+        }
+        if (window.addEventListener) { window.addEventListener('load', edSplitSum); }
 
         // Accounts tab: the _Have / _Spent note shows only for a Loan
         function edAccTypeNote() {
@@ -1315,6 +1443,7 @@ a.file-tile { text-decoration: none; cursor: pointer; }
                                                                                 </tr>
                                                                                 <asp:Repeater ID="rptPreview" runat="server">
                                                                                     <ItemTemplate>
+                                                                                        <asp:Literal ID="litSection" runat="server" />
                                                                                         <tr class='<%# If(CBool(Eval("AutoRow")), "auto", "") %>'>
                                                                                             <td class="mem"><%# Server.HtmlEncode(Convert.ToString(Eval("Name"))) %><asp:HiddenField ID="hfIdx" runat="server" /></td>
                                                                                             <td class="ex"><%# M(Eval("ExBalance")) %></td>
@@ -1326,7 +1455,7 @@ a.file-tile { text-decoration: none; cursor: pointer; }
                                                                                             <td><%# M(Eval("Debt")) %></td>
                                                                                             <td class="items"><%# HtmlLines(Eval("Lines")) %></td>
                                                                                             <td class="b"><%# M(Eval("Total")) %></td>
-                                                                                            <td><asp:DropDownList ID="ddlAccount" runat="server" CssClass="pv-ddl" AutoPostBack="true" OnSelectedIndexChanged="PreviewSelection_Changed" /></td>
+                                                                                            <td class="pv-acc"><asp:DropDownList ID="ddlAccount" runat="server" CssClass="pv-ddl" AutoPostBack="true" OnSelectedIndexChanged="PreviewSelection_Changed" /><asp:Literal ID="litSplit" runat="server" /><asp:LinkButton ID="lnkSplit" runat="server" CssClass="pv-split" CommandName="Split" CommandArgument='<%# Eval("LineKey") %>' CausesValidation="false" ToolTip="Split the payment between several accounts">+</asp:LinkButton></td>
                                                                                             <td><asp:DropDownList ID="ddlType" runat="server" CssClass="pv-ddl" AutoPostBack="true" OnSelectedIndexChanged="PreviewSelection_Changed" /></td>
                                                                                             <td><asp:DropDownList ID="ddlPaidFrom" runat="server" CssClass="pv-ddl" AutoPostBack="true" OnSelectedIndexChanged="PreviewSelection_Changed" /></td>
                                                                                             <td class='b <%# NegCss(Eval("NextBalance")) %>'><%# M(Eval("NextBalance")) %></td>
@@ -1339,27 +1468,63 @@ a.file-tile { text-decoration: none; cursor: pointer; }
                                                                                 </asp:Repeater>
                                                                             </table>
                                                                             <asp:Label ID="lblNoPreview" runat="server" CssClass="tab-note" Text="Click Calculate to build the Preview." />
+
                                                                         </div>
                                                                     </asp:View>
                                                                 </asp:MultiView>
+
+                                                                <%-- ===== Dialog: Split payment (the round + next to a Preview row's Account) ===== --%>
+                                                                <asp:Panel ID="pnlSplit" runat="server" CssClass="modal-back" Visible="false" DefaultButton="btnSplitSave">
+                                                                    <div class="modal-box">
+                                                                        <h3>Split payment &ndash; <asp:Label ID="lblSplitFor" runat="server" /></h3>
+                                                                        <div class="tab-note">Who pays for this line and how much: each account pays its amount, and the member owes each of them that amount. The amounts must add up to the line's total.</div>
+                                                                        <table class="split-grid">
+                                                                            <tr><th>Account</th><th>Paid From</th><th>Amount</th><th></th></tr>
+                                                                            <asp:Repeater ID="rptSplit" runat="server">
+                                                                                <ItemTemplate>
+                                                                                    <tr>
+                                                                                        <td><asp:DropDownList ID="ddlSplitAccount" runat="server" CssClass="pv-ddl" AutoPostBack="true" OnSelectedIndexChanged="SplitAccount_Changed" /></td>
+                                                                                        <td><asp:DropDownList ID="ddlSplitFund" runat="server" CssClass="pv-ddl" /></td>
+                                                                                        <td><asp:TextBox ID="txtSplitAmount" runat="server" CssClass="txt-input" MaxLength="15" placeholder="0.000" data-split="1" oninput="edSplitSum();" /></td>
+                                                                                        <td><asp:LinkButton ID="lnkSplitRemove" runat="server" CssClass="acc-act del" CommandName="Remove" CommandArgument='<%# Container.ItemIndex %>' CausesValidation="false">Remove</asp:LinkButton></td>
+                                                                                    </tr>
+                                                                                </ItemTemplate>
+                                                                            </asp:Repeater>
+                                                                        </table>
+                                                                        <asp:LinkButton ID="lnkSplitAdd" runat="server" CssClass="acc-act" CausesValidation="false" style="margin-left:0">+ Add payer</asp:LinkButton>
+                                                                        <div class="split-sum">Line total: <asp:Literal ID="litSplitDue" runat="server" /> &nbsp;&middot;&nbsp; Entered: <span id="splitGiven"></span> &nbsp;&middot;&nbsp; Left: <span id="splitLeft"></span></div>
+                                                                        <asp:Label ID="lblSplitErr" runat="server" CssClass="warn-text" Visible="false" />
+                                                                        <div class="modal-btns">
+                                                                            <asp:Button ID="btnSplitSave" runat="server" Text="Save" CssClass="btn-save" CausesValidation="false" />
+                                                                            <asp:Button ID="btnSplitClear" runat="server" Text="One payer" CssClass="btn-cancel" CausesValidation="false" ToolTip="Remove the split: back to one payer" />
+                                                                            <asp:Button ID="btnSplitCancel" runat="server" Text="Cancel" CssClass="btn-cancel" CausesValidation="false" />
+                                                                        </div>
+                                                                    </div>
+                                                                </asp:Panel>
 
                                                                 <%-- ===== Dialog: Add New Member ===== --%>
                                                                 <asp:Panel ID="pnlAddMember" runat="server" CssClass="modal-back" Visible="false">
                                                                     <div class="modal-box">
                                                                         <h3>Add New Member</h3>
-                                                                        <div class="modal-row"><span class="lbl">Member:</span><asp:TextBox ID="txtNewMemberName" runat="server" CssClass="txt-input" /></div>
-                                                                        <div class="modal-row"><span class="lbl">Staff ID:</span><asp:TextBox ID="txtNewMemberStaffId" runat="server" CssClass="txt-input" MaxLength="50" placeholder="Windows login, e.g. 2271" /></div>
-                                                                        <div class="modal-row"><span class="lbl">Mobile No:</span><asp:TextBox ID="txtNewMemberMobile" runat="server" CssClass="txt-input" MaxLength="30" TextMode="Phone" placeholder="e.g. 36001234" /></div>
-                                                                        <div class="modal-row"><span class="lbl">CPR:</span><asp:TextBox ID="txtNewMemberCpr" runat="server" CssClass="txt-input" MaxLength="11" inputmode="numeric" placeholder="9 digits" /></div>
-                                                                        <div class="modal-row"><span class="lbl">Email:</span><asp:TextBox ID="txtNewMemberEmail" runat="server" CssClass="txt-input" MaxLength="100" TextMode="Email" placeholder="name@example.com" /></div>
-                                                                        <div class="modal-row"><span class="lbl">Balance:</span><asp:TextBox ID="txtNewMemberBalance" runat="server" CssClass="txt-input" TextMode="Number" step="0.001" onfocus="this.select();" /></div>
-                                                                        <div class="modal-row"><span class="lbl">Status:</span>
+                                                                        <div class="modal-row"><span class="lbl">Customer Type:</span>
+                                                                            <asp:DropDownList ID="ddlNewMemberKind" runat="server" ClientIDMode="Static" CssClass="ddl-input" onchange="edMemberKind();">
+                                                                                <asp:ListItem Text="Individual" Value="Individual" Selected="True" />
+                                                                                <asp:ListItem Text="Shop" Value="Shop" />
+                                                                            </asp:DropDownList></div>
+                                                                        <div class="modal-row"><span class="lbl" id="newMemberNameLbl">Member:</span><asp:TextBox ID="txtNewMemberName" runat="server" CssClass="txt-input" /></div>
+                                                                        <div class="modal-note shop-only" id="newShopNote">The shop gets five accounts: <b>&lt;Shop&gt;_Budget</b>, <b>_Cash</b>, <b>_Loss</b>, <b>_Profit</b> and <b>_Stock</b> (no others can be added).</div>
+                                                                        <div class="modal-row ind-only"><span class="lbl">Staff ID:</span><asp:TextBox ID="txtNewMemberStaffId" runat="server" CssClass="txt-input" MaxLength="50" placeholder="Windows login, e.g. 2271" /></div>
+                                                                        <div class="modal-row ind-only"><span class="lbl">Mobile No:</span><asp:TextBox ID="txtNewMemberMobile" runat="server" CssClass="txt-input" MaxLength="30" TextMode="Phone" placeholder="e.g. 36001234" /></div>
+                                                                        <div class="modal-row ind-only"><span class="lbl">CPR:</span><asp:TextBox ID="txtNewMemberCpr" runat="server" CssClass="txt-input" MaxLength="11" inputmode="numeric" placeholder="9 digits" /></div>
+                                                                        <div class="modal-row ind-only"><span class="lbl">Email:</span><asp:TextBox ID="txtNewMemberEmail" runat="server" CssClass="txt-input" MaxLength="100" TextMode="Email" placeholder="name@example.com" /></div>
+                                                                        <div class="modal-row ind-only"><span class="lbl">Balance:</span><asp:TextBox ID="txtNewMemberBalance" runat="server" CssClass="txt-input" TextMode="Number" step="0.001" onfocus="this.select();" /></div>
+                                                                        <div class="modal-row ind-only"><span class="lbl">Status:</span>
                                                                             <asp:DropDownList ID="ddlNewMemberStatus" runat="server" CssClass="ddl-input">
                                                                                 <asp:ListItem Text="Active" Value="Active" Selected="True" />
                                                                                 <asp:ListItem Text="Frozen (suspended / inactive)" Value="Frozen" />
                                                                             </asp:DropDownList></div>
-                                                                        <div class="modal-row grp-row"><span class="lbl">Comment:</span><asp:TextBox ID="txtNewMemberComment" runat="server" CssClass="txt-input mm-comment-new" TextMode="MultiLine" Rows="2" MaxLength="1000" placeholder="Optional note about this member" /></div>
-                                                                        <div class="modal-row grp-row"><span class="lbl">Groups:</span>
+                                                                        <div class="modal-row grp-row ind-only"><span class="lbl">Comment:</span><asp:TextBox ID="txtNewMemberComment" runat="server" CssClass="txt-input mm-comment-new" TextMode="MultiLine" Rows="2" MaxLength="1000" placeholder="Optional note about this member" /></div>
+                                                                        <div class="modal-row grp-row ind-only"><span class="lbl">Groups:</span>
                                                                             <div class="grp-box">
                                                                                 <asp:CheckBoxList ID="cblNewMemberGroups" runat="server" CssClass="grp-checks" RepeatLayout="Flow" RepeatDirection="Horizontal" />
                                                                                 <div class="grp-new">
@@ -1432,11 +1597,25 @@ a.file-tile { text-decoration: none; cursor: pointer; }
                                                         </asp:View>
                                                         <%-- ---------- Main Dashboard (empty) ---------- --%>
                                                         <asp:View ID="viewDashboard" runat="server">
-                                                            <div class="tab-body-inner"></div>
+                                                            <div class="tab-body-inner">
+                                                                <div class="filter-bar">
+                                                                    <span class="lbl">Group:</span>
+                                                                    <asp:DropDownList ID="ddlDashGroup" runat="server" CssClass="ddl-input" AutoPostBack="true" />
+                                                                </div>
+                                                                <asp:Label ID="lblDashMsg" runat="server" CssClass="order-msg err" Visible="false" />
+                                                                <asp:Literal ID="litDashboard" runat="server" />
+                                                            </div>
                                                         </asp:View>
                                                         <%-- ---------- Matrices (empty) ---------- --%>
                                                         <asp:View ID="viewMatrices" runat="server">
-                                                            <div class="tab-body-inner"></div>
+                                                            <div class="tab-body-inner">
+                                                                <div class="filter-bar">
+                                                                    <span class="lbl">Member:</span>
+                                                                    <asp:DropDownList ID="ddlMxMember" runat="server" CssClass="ddl-input" AutoPostBack="true" />
+                                                                </div>
+                                                                <asp:Label ID="lblMxMsg" runat="server" CssClass="order-msg err" Visible="false" />
+                                                                <asp:Literal ID="litMatrices" runat="server" />
+                                                            </div>
                                                         </asp:View>
                                                         <%-- ---------- Items ---------- --%>
                                                         <asp:View ID="viewItems" runat="server">
@@ -1453,7 +1632,21 @@ a.file-tile { text-decoration: none; cursor: pointer; }
                                                         </asp:View>
                                                         <%-- ---------- Transactions (empty) ---------- --%>
                                                         <asp:View ID="viewTransactions" runat="server">
-                                                            <div class="tab-body-inner"></div>
+                                                            <div class="tab-body-inner">
+                                                                <div class="filter-bar">
+                                                                    <span class="lbl">Member:</span>
+                                                                    <asp:DropDownList ID="ddlTxMember" runat="server" CssClass="ddl-input" AutoPostBack="true" />
+                                                                    <button type="button" id="btnTxEx" class="btn-op" onclick="edToggleTxEx();">Hide ex columns</button>
+                                                                </div>
+                                                                <asp:HiddenField ID="hfTxEx" runat="server" ClientIDMode="Static" />
+                                                                <asp:Label ID="lblTxMsg" runat="server" CssClass="order-msg err" Visible="false" />
+                                                                <div id="txWrap" class="tx-wrap">
+                                                                    <%-- The person: their details and the total of their accounts --%>
+                                                                    <asp:Literal ID="litTxPerson" runat="server" />
+                                                                    <%-- One grid per account --%>
+                                                                    <asp:Literal ID="litTransactions" runat="server" />
+                                                                </div>
+                                                            </div>
                                                         </asp:View>
                                                         <%-- ---------- Payment ---------- --%>
                                                         <asp:View ID="viewPayment" runat="server">
