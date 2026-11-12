@@ -1,4 +1,4 @@
-﻿<%@ Page Language="VB" AutoEventWireup="false" CodeFile="ExpensesAndDebtsWShopOneGo.aspx.vb" Inherits="ExpensesAndDebtsWShopOneGo"   MaintainScrollPositionOnPostback="true" EnableEventValidation = false  %>
+<%@ Page Language="VB" AutoEventWireup="false" CodeFile="ExpensesAndDebtsWShopOneGo.aspx.vb" Inherits="ExpensesAndDebtsWShopOneGo"   MaintainScrollPositionOnPostback="true" EnableEventValidation = false  %>
 
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head runat="server">
@@ -805,6 +805,10 @@ fieldset.mx-person > legend { padding: 0 8px; font-size: 16px; font-weight: 700;
 .db-grid tr.acc.loan td.name { color: #c2410c; }
 .db-grid td .type { font-size: 12px; color: #94a3b8; margin-left: 6px; font-weight: 400; }
 .db-grid td .note { font-size: 12px; color: #94a3b8; margin-left: 6px; font-weight: 400; }
+.db-grid tr.acc.pl td { font-weight: 700; }
+.db-grid tr.acc.pl td.name { padding-left: 52px; }
+.db-grid tr.pl.pl-pos td { background: #dcfce7; color: #14532d; }
+.db-grid tr.pl.pl-neg td { background: #fee2e2; color: #7f1d1d; }
 .db-grid td.neg { color: #dc2626; }
 .db-grid tr.total td { font-weight: 700; background: #111827; color: #fff; }
 .db-grid tr.total td.neg { color: #fca5a5; }
