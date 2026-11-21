@@ -1177,9 +1177,22 @@ Partial Class ExpensesAndDebtsWShop
             If idx < 0 OrElse idx >= st.Preview.Count Then Continue For
             Dim p As PreviewLine = st.Preview(idx)
             If p.AutoRow Then Continue For
-            If Not p.AccountLocked Then p.Account = CType(ri.FindControl("ddlAccount"), DropDownList).SelectedValue
+            Dim pickedAccount As String = CType(ri.FindControl("ddlAccount"), DropDownList).SelectedValue
+            Dim pickedFrom As String = CType(ri.FindControl("ddlPaidFrom"), DropDownList).SelectedValue
+            Dim cut As Integer = If(pickedFrom, "").IndexOf(PaySep)
+            If UsesPersonPayer(p) Then
+                ' Account = a person, Paid From = "account|fund" of one of their accounts
+                If cut >= 0 AndAlso SameName(PayerPerson(st, pickedFrom.Substring(0, cut)), pickedAccount) Then
+                    p.Account = pickedFrom.Substring(0, cut)
+                    p.PaidFrom = pickedFrom.Substring(cut + 1)
+                ElseIf pickedAccount <> "" AndAlso Not SameName(PayerPerson(st, p.Account), pickedAccount) Then
+                    p.Account = DefaultAccountOf(st, pickedAccount, p.Name)   ' another person: the row's own account or their first
+                End If
+            Else
+                If Not p.AccountLocked Then p.Account = pickedAccount
+                p.PaidFrom = If(cut >= 0, pickedFrom.Substring(cut + 1), pickedFrom)
+            End If
             If Not p.TypeLocked Then p.TxType = CType(ri.FindControl("ddlType"), DropDownList).SelectedValue
-            p.PaidFrom = CType(ri.FindControl("ddlPaidFrom"), DropDownList).SelectedValue
         Next
         For Each m As MemberLine In st.Members.Where(Function(x) x.IsShopLine)
             m.Credit = 0D : m.Withdraw = 0D   ' the shop's goods lines have no Credit / Withdraw
@@ -1256,7 +1269,7 @@ Partial Class ExpensesAndDebtsWShop
         rptMembers.DataBind()
 
         ' Preview
-        FillDropDown(ddlHeaderAccount, MemberNames(st), "")
+        FillDropDown(ddlHeaderAccount, PayerPersons(st), "")
         FillDropDown(ddlHeaderType, TransactionTypes, "")
         FillDropDown(ddlHeaderPaidFrom, st.Preview.SelectMany(Function(p) p.PaidFromOptions).Distinct(StringComparer.OrdinalIgnoreCase), "")
         ddlHeaderAccount.Enabled = Not viewing
@@ -1775,11 +1788,26 @@ Partial Class ExpensesAndDebtsWShop
         If ddlPaidFrom.Items.Count = 0 Then ddlPaidFrom.Items.Add(New ListItem("", ""))
         Dim it As ListItem = ddlPaidFrom.Items.FindByValue(If(p.PaidFrom, ""))
         If it IsNot Nothing Then ddlPaidFrom.SelectedValue = it.Value
+        If UsesPersonPayer(p) Then
+            ' Account = the person; Paid From = their accounts
+            Dim persons As New List(Of String)
+            For Each li As ListItem In ddlAccount.Items
+                Dim person As String = PayerPerson(State, li.Value)
+                If person <> "" AndAlso Not persons.Contains(person, StringComparer.OrdinalIgnoreCase) Then persons.Add(person)
+            Next
+            Dim rowPerson As String = PayerPerson(State, p.Account)
+            FillDropDown(ddlAccount, persons, rowPerson)
+            ddlPaidFrom.Items.Clear()
+            If rowPerson <> "" Then ddlPaidFrom.Items.AddRange(PaidFromChoices(State, p.TxType, p.MemberId, rowPerson).ToArray())
+            If ddlPaidFrom.Items.Count = 0 Then ddlPaidFrom.Items.Add(New ListItem("", ""))
+            Dim want As ListItem = ddlPaidFrom.Items.FindByValue(If(p.Account, "") & PaySep & If(p.PaidFrom, ""))
+            If want IsNot Nothing Then ddlPaidFrom.SelectedValue = want.Value
+        End If
 
         Dim editable As Boolean = Not IsViewing
         ddlAccount.Enabled = editable AndAlso Not p.AccountLocked
         ddlType.Enabled = editable AndAlso Not p.TypeLocked
-        ddlPaidFrom.Enabled = editable AndAlso p.PaidFromOptions.Count > 0
+        ddlPaidFrom.Enabled = editable AndAlso (p.PaidFromOptions.Count > 0 OrElse ddlPaidFrom.Items.Count > 1)
 
         ' Split payment: the round + (an Expense row of a member); when split, the payers instead of the dropdowns
         Dim mline As MemberLine = State.Members.FirstOrDefault(Function(x) SameName(x.LineKey, p.LineKey))
@@ -1848,16 +1876,21 @@ Partial Class ExpensesAndDebtsWShop
     Protected Sub rptSplit_ItemDataBound(sender As Object, e As RepeaterItemEventArgs) Handles rptSplit.ItemDataBound
         If e.Item.ItemType <> ListItemType.Item AndAlso e.Item.ItemType <> ListItemType.AlternatingItem Then Exit Sub
         Dim part As SplitPart = CType(e.Item.DataItem, SplitPart)
-        FillDropDown(CType(e.Item.FindControl("ddlSplitAccount"), DropDownList), MemberNames(State), part.Account)
+        ' Account = the person, Paid From = one of their accounts (value "account|fund")
+        Dim person As String = PayerPerson(State, part.Account)
+        FillDropDown(CType(e.Item.FindControl("ddlSplitAccount"), DropDownList), PayerPersons(State), person)
         Dim ddlFund As DropDownList = CType(e.Item.FindControl("ddlSplitFund"), DropDownList)
-        Dim options As List(Of String) = PayerFundOptions(part.Account)
         ddlFund.Items.Clear()
-        For Each f As String In options
-            ddlFund.Items.Add(New ListItem(f, f))
-        Next
+        If person <> "" Then ddlFund.Items.AddRange(PaidFromChoices(State, TxNormal, "", person).ToArray())
         If ddlFund.Items.Count = 0 Then ddlFund.Items.Add(New ListItem("", ""))
-        If Not options.Contains(If(part.PaidFrom, "")) Then part.PaidFrom = If(options.Count > 0, options(0), "")
-        ddlFund.SelectedValue = If(ddlFund.Items.FindByValue(part.PaidFrom) IsNot Nothing, part.PaidFrom, ddlFund.Items(0).Value)
+        Dim want As String = If(part.Account, "") & PaySep & If(part.PaidFrom, "")
+        If ddlFund.Items.FindByValue(want) Is Nothing Then want = ddlFund.Items(0).Value
+        ddlFund.SelectedValue = want
+        Dim cutAt As Integer = want.IndexOf(PaySep)
+        If cutAt >= 0 Then
+            part.Account = want.Substring(0, cutAt)
+            part.PaidFrom = want.Substring(cutAt + 1)
+        End If
         CType(e.Item.FindControl("txtSplitAmount"), TextBox).Text = If(part.Amount = 0D, "", Money(part.Amount))
     End Sub
 
@@ -1873,6 +1906,19 @@ Partial Class ExpensesAndDebtsWShop
                 .Account = CType(ri.FindControl("ddlSplitAccount"), DropDownList).SelectedValue,
                 .PaidFrom = CType(ri.FindControl("ddlSplitFund"), DropDownList).SelectedValue,
                 .Amount = amount})
+        Next
+        ' The lists show the person and "account|fund": back to the paying account and its fund
+        For Each part As SplitPart In parts
+            Dim person As String = If(part.Account, "")
+            Dim value As String = If(part.PaidFrom, "")
+            Dim cut As Integer = value.IndexOf(PaySep)
+            If cut >= 0 AndAlso SameName(PayerPerson(st, value.Substring(0, cut)), person) Then
+                part.Account = value.Substring(0, cut)
+                part.PaidFrom = value.Substring(cut + 1)
+            Else
+                part.Account = If(person = "", "", DefaultAccountOf(st, person, ""))   ' another person: their first account
+                part.PaidFrom = ""
+            End If
         Next
         st.SplitDraft = parts
         Return ok
@@ -2818,7 +2864,7 @@ Partial Class ExpensesAndDebtsWShop
         If ddlHeaderAccount.SelectedValue = "" Then Return
         For Each p As PreviewLine In State.Preview
             If p.AutoRow OrElse p.AccountLocked Then Continue For
-            p.Account = ddlHeaderAccount.SelectedValue
+            p.Account = If(UsesPersonPayer(p), DefaultAccountOf(State, ddlHeaderAccount.SelectedValue, p.Name), ddlHeaderAccount.SelectedValue)
             RefreshPaidFrom(p)
         Next
         RecalculatePreview()
@@ -2943,6 +2989,62 @@ Partial Class ExpensesAndDebtsWShop
     End Function
 
     ''' <summary>Members' names for the Account lists (not the shop's goods lines).</summary>
+    ' ---------- Payer: a person (Account), then one of their accounts (Paid From) ----------
+    ' A row's payer is still kept as the paying account and its fund (p.Account / p.PaidFrom); only the lists show
+    ' it as two steps: Account = the person, Paid From = their accounts (each item's value is "account|fund").
+
+    Private Const PaySep As String = "|"
+
+    ''' <summary>Rows whose payer is picked as person + account (not the shop's own goods rows, not locked rows).</summary>
+    Private Function UsesPersonPayer(p As PreviewLine) As Boolean
+        Return Not p.AutoRow AndAlso Not p.AccountLocked AndAlso p.TxType <> TxShopSale AndAlso p.TxType <> TxShopLoss
+    End Function
+
+    ''' <summary>The person an account belongs to ("Jalal Hasan - Cash" -> "Jalal Hasan"); any other name stays as it is.</summary>
+    Private Function PayerPerson(st As OrderState, accountName As String) As String
+        Dim m As MemberLine = st.Members.FirstOrDefault(Function(x) Not x.IsShopLine AndAlso SameName(x.Name, accountName))
+        If m IsNot Nothing AndAlso m.OwnerName <> "" Then Return m.OwnerName
+        Return If(accountName, "")
+    End Function
+
+    ''' <summary>The Account list: each person once (and members without accounts).</summary>
+    Private Function PayerPersons(st As OrderState) As List(Of String)
+        Return st.Members.Where(Function(m) Not m.IsShopLine).Select(Function(m) If(m.OwnerName <> "", m.OwnerName, m.Name)).
+                          Where(Function(n) n <> "").Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+    End Function
+
+    ''' <summary>A person's accounts that can pay (their account lines); a name without accounts is its own.</summary>
+    Private Function PayerAccounts(st As OrderState, person As String) As List(Of String)
+        Dim acc As List(Of String) = st.Members.Where(Function(m) Not m.IsShopLine AndAlso m.OwnerName <> "" AndAlso SameName(m.OwnerName, person)).
+                                                Select(Function(m) m.Name).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+        If acc.Count = 0 AndAlso person <> "" Then acc.Add(person)
+        Return acc
+    End Function
+
+    ''' <summary>The account a person pays from when picked: the row's own account if it is theirs, else their first.</summary>
+    Private Function DefaultAccountOf(st As OrderState, person As String, rowAccount As String) As String
+        Dim acc As List(Of String) = PayerAccounts(st, person)
+        If acc.Count = 0 Then Return person
+        Dim own As String = acc.FirstOrDefault(Function(a) SameName(a, rowAccount))
+        Return If(own, acc(0))
+    End Function
+
+    ''' <summary>Paid From list for a person: one item per account (and fund), text = the account ("Cash", "BBK 4082").</summary>
+    Private Function PaidFromChoices(st As OrderState, txType As String, memberId As String, person As String) As List(Of ListItem)
+        Dim items As New List(Of ListItem)
+        For Each accName As String In PayerAccounts(st, person)
+            Dim probe As New PreviewLine With {.Account = accName, .TxType = txType, .MemberId = memberId}
+            RefreshPaidFrom(probe)
+            Dim line As MemberLine = st.Members.FirstOrDefault(Function(x) Not x.IsShopLine AndAlso SameName(x.Name, accName))
+            Dim shortName As String = If(line IsNot Nothing AndAlso line.OwnerName <> "", line.ShortName, "")
+            For Each f As String In probe.PaidFromOptions
+                Dim text As String = If(shortName = "", f, If(probe.PaidFromOptions.Count = 1 OrElse SameName(shortName, f), shortName, shortName & " - " & f))
+                items.Add(New ListItem(text, accName & PaySep & f))
+            Next
+        Next
+        Return items
+    End Function
+
     Private Function MemberNames(st As OrderState) As List(Of String)
         Return st.Members.Where(Function(m) Not m.IsShopLine).Select(Function(m) m.Name).
                           Where(Function(n) n <> "").Distinct(StringComparer.OrdinalIgnoreCase).ToList()
